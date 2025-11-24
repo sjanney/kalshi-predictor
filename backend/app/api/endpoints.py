@@ -142,9 +142,9 @@ async def _get_league_predictions(league: str) -> List[Dict]:
                     break
         
         if not has_valid_matches and games:
-             print("DEBUG: No matching game markets found. Generating MOCK markets for demo.")
-             markets = kalshi_client.generate_mock_markets_for_games(games)
-             print(f"Mock markets generated: {len(markets)}")
+             print("DEBUG: No matching game markets found. Synthesizing spread-derived markets.")
+             markets = kalshi_client.generate_synthetic_markets_for_games(games)
+             print(f"Synthetic markets generated: {len(markets)}")
 
     except Exception as e:
         print(f"Error fetching markets: {e}")

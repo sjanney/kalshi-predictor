@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useRef } from 'react';
+import React, { useEffect, useState, useRef, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { api, type Game, type League } from '../lib/api';
 import { useFilterStore } from '../lib/store';
@@ -22,7 +22,12 @@ const Dashboard: React.FC = () => {
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
     const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
+    const [autoRefreshEnabled, setAutoRefreshEnabled] = useState(true);
+    const [refreshIntervalMinutes, setRefreshIntervalMinutes] = useState<5 | 10>(5);
+    const [nextRefreshTime, setNextRefreshTime] = useState<Date | null>(null);
+    const [refreshCountdown, setRefreshCountdown] = useState('');
     const [isRefreshing, setIsRefreshing] = useState(false);
+    const [lastRefreshTrigger, setLastRefreshTrigger] = useState(Date.now());
     const [showToolbox, setShowToolbox] = useState(false);
     const [edgeAlertsEnabled, setEdgeAlertsEnabled] = useState(false);
     const [edgeThreshold, setEdgeThreshold] = useState(0.15);
@@ -32,36 +37,67 @@ const Dashboard: React.FC = () => {
     const [selectedGame, setSelectedGame] = useState<Game | null>(null);
     const isElectron = typeof navigator !== 'undefined' && navigator.userAgent.includes('Electron');
     const alertedGameIdsRef = useRef<Set<string>>(new Set());
+    const hasLoadedInitialRef = useRef(false);
+    const autoRefreshTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+    const clearAutoRefreshTimeout = useCallback(() => {
+        if (autoRefreshTimeoutRef.current) {
+            clearTimeout(autoRefreshTimeoutRef.current);
+            autoRefreshTimeoutRef.current = null;
+        }
+    }, []);
 
     // Store
     const { minConfidence, sortBy, league, setFilter } = useFilterStore();
 
-    const fetchGames = async () => {
+    const fetchGames = useCallback(async () => {
         try {
             setIsRefreshing(true);
-            // Initial loading state only if we don't have games or if switching leagues
-            if (games.length === 0) setLoading(true);
-            
+            if (!hasLoadedInitialRef.current) setLoading(true);
             setError(null);
             const data = await api.getGames(sortBy, league);
             setGames(data);
             setLastUpdated(new Date());
+            hasLoadedInitialRef.current = true;
         } catch (err) {
             console.error("Failed to fetch games:", err);
             setError("Failed to connect to prediction engine.");
         } finally {
             setLoading(false);
             setIsRefreshing(false);
+            setLastRefreshTrigger(Date.now());
         }
-    };
+    }, [sortBy, league]);
 
     useEffect(() => {
-        setGames([]); // Clear games when switching leagues
+        setGames([]);
         setLoading(true);
+        setError(null);
+        hasLoadedInitialRef.current = false;
         fetchGames();
-        const interval = setInterval(fetchGames, 60000 * 5); // 5 mins
-        return () => clearInterval(interval);
-    }, [sortBy, league]); // Refetch when sort or league changes
+        return () => clearAutoRefreshTimeout();
+    }, [fetchGames, clearAutoRefreshTimeout]);
+
+    // Load auto-refresh preferences
+    useEffect(() => {
+        if (typeof window === 'undefined') return;
+        try {
+            const stored = localStorage.getItem('kalshi-auto-refresh');
+            if (stored) {
+                const parsed = JSON.parse(stored);
+                if (typeof parsed.enabled === 'boolean') setAutoRefreshEnabled(parsed.enabled);
+                if (parsed.interval === 10) setRefreshIntervalMinutes(10);
+            }
+        } catch (err) {
+            console.warn('Failed to load auto-refresh preferences', err);
+        }
+    }, []);
+
+    useEffect(() => {
+        if (typeof window === 'undefined') return;
+        const payload = JSON.stringify({ enabled: autoRefreshEnabled, interval: refreshIntervalMinutes });
+        localStorage.setItem('kalshi-auto-refresh', payload);
+    }, [autoRefreshEnabled, refreshIntervalMinutes]);
 
     // Persist toolbox preferences
     useEffect(() => {
@@ -95,6 +131,47 @@ const Dashboard: React.FC = () => {
         alertedGameIdsRef.current.clear();
         setEdgeAlerts([]);
     }, [edgeThreshold]);
+
+    useEffect(() => {
+        clearAutoRefreshTimeout();
+        if (!autoRefreshEnabled) {
+            setNextRefreshTime(null);
+            return;
+        }
+
+        const intervalMs = refreshIntervalMinutes * 60000;
+        const scheduledTime = new Date(lastRefreshTrigger + intervalMs);
+        setNextRefreshTime(scheduledTime);
+        const delay = Math.max(scheduledTime.getTime() - Date.now(), 0);
+
+        autoRefreshTimeoutRef.current = setTimeout(() => {
+            fetchGames();
+        }, delay);
+
+        return () => clearAutoRefreshTimeout();
+    }, [autoRefreshEnabled, refreshIntervalMinutes, lastRefreshTrigger, fetchGames, clearAutoRefreshTimeout]);
+
+    useEffect(() => {
+        if (!autoRefreshEnabled || !nextRefreshTime) {
+            setRefreshCountdown('');
+            return;
+        }
+
+        const updateCountdown = () => {
+            const diff = nextRefreshTime.getTime() - Date.now();
+            if (diff <= 0) {
+                setRefreshCountdown('now');
+                return;
+            }
+            const minutes = Math.floor(diff / 60000);
+            const seconds = Math.floor((diff % 60000) / 1000);
+            setRefreshCountdown(`${minutes}:${seconds.toString().padStart(2, '0')}`);
+        };
+
+        updateCountdown();
+        const id = setInterval(updateCountdown, 1000);
+        return () => clearInterval(id);
+    }, [autoRefreshEnabled, nextRefreshTime]);
 
     // Edge detection loop
     useEffect(() => {
@@ -243,6 +320,39 @@ const Dashboard: React.FC = () => {
                                     </button>
                                 ))}
                             </div>
+                        </div>
+
+                        <div className="flex flex-col text-xs text-zinc-500 gap-1 border-l border-zinc-800 pl-4">
+                            <div className="flex items-center gap-3">
+                                <span className="font-medium text-zinc-500 uppercase tracking-wider">Live recheck</span>
+                                <label className="relative inline-flex items-center cursor-pointer">
+                                    <input
+                                        type="checkbox"
+                                        className="sr-only peer"
+                                        checked={autoRefreshEnabled}
+                                        onChange={(e) => setAutoRefreshEnabled(e.target.checked)}
+                                    />
+                                    <div className="w-9 h-5 bg-zinc-700 rounded-full peer peer-checked:bg-emerald-600 transition-colors">
+                                        <div className="absolute top-[2px] left-[2px] h-4 w-4 rounded-full bg-white transition-transform peer-checked:translate-x-4" />
+                                    </div>
+                                </label>
+                                <select
+                                    value={refreshIntervalMinutes}
+                                    onChange={(e) => setRefreshIntervalMinutes(Number(e.target.value) as 5 | 10)}
+                                    className="bg-transparent border border-zinc-800 rounded-md text-[11px] font-semibold uppercase tracking-wider px-2 py-1 text-zinc-300"
+                                    disabled={!autoRefreshEnabled}
+                                >
+                                    <option value={5}>5 min</option>
+                                    <option value={10}>10 min</option>
+                                </select>
+                            </div>
+                            <span className="text-[11px] text-zinc-500">
+                                {autoRefreshEnabled
+                                    ? refreshCountdown
+                                        ? `Next update in ${refreshCountdown}`
+                                        : 'Scheduling next update...'
+                                    : 'Auto refresh paused'}
+                            </span>
                         </div>
                     </div>
                 </div>
