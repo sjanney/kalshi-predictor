@@ -35,7 +35,7 @@ export const Card: React.FC<{
         <div 
             onClick={onClick}
             className={cn(
-                "bg-surface border border-zinc-800 rounded-xl overflow-hidden transition-all duration-300", 
+                "bg-surface border border-zinc-800 rounded-xl overflow-visible transition-all duration-300", 
                 onClick && "cursor-pointer hover:border-zinc-700 hover:bg-surface_highlight/50",
                 className
             )}

@@ -20,10 +20,13 @@ def test_generate_prediction_structure():
         "status": "Scheduled"
     }
     market = {
-        "last_price": 60,
-        "yes_bid": 55,
-        "yes_ask": 65,
-        "volume_24h": 1000
+        "type": "single_home",
+        "home_market": {
+            "prob": 0.6,
+            "yes_bid": 55,
+            "yes_ask": 65,
+            "volume": 1000
+        }
     }
     
     result = engine.generate_prediction(game, {}, {}, market)
