@@ -107,6 +107,7 @@ class PredictionEngine:
         volume = 0
         yes_bid = 0
         yes_ask = 100
+        spread = 15
         
         # Extract probabilities from the matched market structure
         if kalshi_markets:
