@@ -2,14 +2,15 @@ from fastapi import APIRouter, HTTPException, Query
 from typing import List, Dict, Optional
 from app.services.kalshi import KalshiClient
 from app.services.nba import NBAClient
+from app.services.nfl import NFLClient
 from app.services.prediction import PredictionEngine
-import difflib
 import re
 
 router = APIRouter()
 
 kalshi_client = KalshiClient()
 nba_client = NBAClient()
+nfl_client = NFLClient()
 prediction_engine = PredictionEngine()
 
 def _build_team_keys(name: str, abbr: str) -> List[str]:
@@ -36,7 +37,7 @@ def _market_text(market: Dict) -> str:
 
 def match_game_to_markets(game: Dict, markets: List[Dict]) -> Optional[Dict]:
     """
-    Match an NBA game to a Kalshi market (or pair of markets).
+    Match a game to a Kalshi market (or pair of markets).
     Returns a dict with 'home_market' and 'away_market' keys if found.
     """
     home_name = game.get('home_team_name', '')
@@ -106,18 +107,18 @@ def match_game_to_markets(game: Dict, markets: List[Dict]) -> Optional[Dict]:
 
     return None
 
-@router.get("/games", response_model=List[Dict])
-async def get_games(
-    sort_by: str = Query("time", enum=["time", "divergence", "confidence"]),
-    filter_status: Optional[str] = None
-):
-    """
-    Get upcoming games with predictions.
-    """
-    # 1. Fetch NBA Games
-    print("Fetching games...")
+async def _get_league_predictions(league: str) -> List[Dict]:
+    """Helper to get predictions for a specific league."""
+    # 1. Fetch Games
+    print(f"Fetching {league.upper()} games...")
     try:
-        games = nba_client.get_scoreboard()
+        if league == "nba":
+            games = nba_client.get_scoreboard()
+        elif league == "nfl":
+            games = nfl_client.get_scoreboard()
+        else:
+            games = [] 
+            
         print(f"Games fetched: {len(games) if games else 0}")
     except Exception as e:
         print(f"Error in get_scoreboard: {e}")
@@ -127,9 +128,9 @@ async def get_games(
         return []
         
     # 2. Fetch Kalshi Markets
-    print("Fetching Kalshi markets...")
+    print(f"Fetching Kalshi {league.upper()} markets...")
     try:
-        markets = kalshi_client.get_nba_markets()
+        markets = kalshi_client.get_league_markets(league)
         print(f"Markets fetched: {len(markets) if markets else 0}")
         
         # Check if we have any valid matches
@@ -153,10 +154,6 @@ async def get_games(
     results = []
     for game in games:
         try:
-            # Filter status if requested
-            if filter_status and filter_status.lower() not in game.get('status', '').lower():
-                continue
-
             # Placeholder stats (fetching is expensive/complex without paid API, using records)
             home_stats = {} 
             away_stats = {}
@@ -164,7 +161,10 @@ async def get_games(
             matched_markets = match_game_to_markets(game, markets)
             
             prediction_data = prediction_engine.generate_prediction(
-                game, home_stats, away_stats, matched_markets
+                {**game, "league": league},
+                home_stats,
+                away_stats,
+                matched_markets
             )
             
             results.append(prediction_data)
@@ -173,6 +173,23 @@ async def get_games(
             print(f"Error processing game {game.get('game_id')}: {e}")
             continue
             
+    return results
+
+@router.get("/games", response_model=List[Dict])
+async def get_games(
+    sort_by: str = Query("time", enum=["time", "divergence", "confidence"]),
+    league: str = Query("nba", enum=["nba", "nfl"]),
+    filter_status: Optional[str] = None
+):
+    """
+    Get upcoming games with predictions.
+    """
+    results = await _get_league_predictions(league)
+    
+    # Filtering
+    if filter_status:
+        results = [r for r in results if filter_status.lower() in r.get('status', '').lower()]
+
     # Sorting
     if sort_by == "divergence":
         results.sort(key=lambda x: x['prediction']['divergence'], reverse=True)
@@ -180,7 +197,7 @@ async def get_games(
         # Custom sort for High > Medium > Low
         conf_map = {"HIGH": 3, "MEDIUM": 2, "LOW": 1}
         results.sort(key=lambda x: conf_map.get(x['prediction']['confidence_score'], 0), reverse=True)
-    else: # time (default) - assuming games are already roughly sorted by time
+    else: # time (default)
         pass
             
     print(f"Returning {len(results)} results")
@@ -188,4 +205,20 @@ async def get_games(
 
 @router.get("/games/{game_id}")
 async def get_game_details(game_id: str):
-    return {"game_id": game_id, "details": "Deep dive analysis coming soon in v2.1"}
+    """
+    Get deep dive details for a specific game.
+    Checks both leagues since ID might not specify league.
+    """
+    # Try NBA first
+    nba_games = await _get_league_predictions("nba")
+    for game in nba_games:
+        if str(game['game_id']) == str(game_id):
+            return game
+            
+    # Try NFL
+    nfl_games = await _get_league_predictions("nfl")
+    for game in nfl_games:
+        if str(game['game_id']) == str(game_id):
+            return game
+            
+    raise HTTPException(status_code=404, detail="Game not found")

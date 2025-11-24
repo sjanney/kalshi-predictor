@@ -197,8 +197,48 @@ class PredictionEngine:
             else:
                 recommendation = "Lean Model"
 
+        # 4. Advanced Analytics & Reasoning
+        
+        # Feature contributions (approximate for display)
+        record_diff = home_win_pct - away_win_pct
+        model_features = {
+            "home_advantage": 0.05,
+            "record_diff": round(record_diff / 2, 3),
+            "recent_form": 0.0  # Placeholder
+        }
+
+        # Market pressure (0-100 scale)
+        market_pressure = min(100, int((volume / 1000) * 20 + (15 - min(15, spread)) * 3))
+        
+        # Reasoning generation
+        reasoning = []
+        if divergence > 0.15:
+            reasoning.append(f"Significant divergence ({int(divergence*100)}%) between model and market suggests a potential edge.")
+        
+        if kalshi_confidence == "HIGH":
+            reasoning.append("High market liquidity indicates sharp money is active.")
+        elif kalshi_confidence == "LOW":
+            reasoning.append("Low market volume warrants caution despite model signal.")
+
+        if home_win_pct > away_win_pct + 0.2:
+            reasoning.append(f"Home team has a dominant record advantage.")
+        elif away_win_pct > home_win_pct + 0.2:
+            reasoning.append(f"Away team is significantly outperforming on the season.")
+
+        if kalshi_trend == "UP":
+            reasoning.append("Market sentiment is trending towards the Home team.")
+        
+        analytics = {
+            "volatility_score": self.calculate_volatility({}, {}), # Reuse for now
+            "stat_divergence": round(divergence, 2),
+            "market_pressure": market_pressure,
+            "model_features": model_features,
+            "reasoning": reasoning
+        }
+
         return {
             "game_id": game.get('game_id'),
+            "league": game.get('league', 'nba'),
             "home_team": game.get('home_team_name'),
             "away_team": game.get('away_team_name'),
             "home_abbr": game.get('home_team_abbrev'),
@@ -217,6 +257,7 @@ class PredictionEngine:
                 "divergence": round(divergence, 2),
                 "volatility": self.calculate_volatility({}, {})
             },
+            "analytics": analytics,
             "factors": {
                 "home_record": home_record,
                 "away_record": away_record,

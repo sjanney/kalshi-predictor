@@ -11,6 +11,18 @@ export interface Prediction {
     volatility: string;
 }
 
+export interface Analytics {
+    volatility_score: string;
+    stat_divergence: number;
+    market_pressure: number;
+    model_features: {
+        home_advantage: number;
+        record_diff: number;
+        recent_form: number;
+    };
+    reasoning: string[];
+}
+
 export interface MarketData {
     price: number;
     yes_bid: number;
@@ -27,6 +39,7 @@ export interface GameFactors {
 
 export interface Game {
     game_id: string;
+    league?: string;
     home_team: string;
     away_team: string;
     home_abbr: string;
@@ -34,22 +47,25 @@ export interface Game {
     game_date: string;
     status: string;
     prediction: Prediction;
+    analytics?: Analytics;
     market_data: MarketData;
     factors: GameFactors;
 }
 
+export type League = 'nba' | 'nfl';
+
 const API_BASE = 'http://localhost:8000/api';
 
 export const api = {
-    getGames: async (sortBy: string = 'time'): Promise<Game[]> => {
-        const response = await fetch(`${API_BASE}/games?sort_by=${sortBy}`);
+    getGames: async (sortBy: string = 'time', league: League = 'nba'): Promise<Game[]> => {
+        const response = await fetch(`${API_BASE}/games?sort_by=${sortBy}&league=${league}`);
         if (!response.ok) {
             throw new Error('Failed to fetch games');
         }
         return response.json();
     },
     
-    getGameDetails: async (gameId: string) => {
+    getGameDetails: async (gameId: string): Promise<Game> => {
         const response = await fetch(`${API_BASE}/games/${gameId}`);
         if (!response.ok) {
             throw new Error('Failed to fetch game details');
@@ -57,4 +73,3 @@ export const api = {
         return response.json();
     }
 };
-

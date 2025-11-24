@@ -4,6 +4,7 @@ from datetime import datetime, timedelta
 from typing import List, Dict, Optional
 
 BASE_URL = "https://api.elections.kalshi.com/trade-api/v2"
+
 NBA_TEAM_KEYWORDS = [
     "hawks", "celtics", "nets", "hornets", "bulls", "cavaliers", "mavericks",
     "nuggets", "pistons", "warriors", "rockets", "pacers", "clippers", "lakers",
@@ -12,9 +13,17 @@ NBA_TEAM_KEYWORDS = [
     "jazz", "wizards"
 ]
 
+NFL_TEAM_KEYWORDS = [
+    "cardinals", "falcons", "ravens", "bills", "panthers", "bears", "bengals",
+    "browns", "cowboys", "broncos", "lions", "packers", "texans", "colts",
+    "jaguars", "chiefs", "dolphins", "vikings", "patriots", "saints", "giants",
+    "jets", "raiders", "eagles", "steelers", "chargers", "49ers", "seahawks",
+    "rams", "buccaneers", "titans", "commanders"
+]
 
-def _is_nba_market(market: Dict) -> bool:
-    """Heuristic to determine whether a Kalshi market references an NBA matchup."""
+
+def _is_league_market(market: Dict, league: str) -> bool:
+    """Heuristic to determine whether a Kalshi market references a league matchup."""
     text_parts = [
         str(market.get('title', '')),
         str(market.get('ticker', '')),
@@ -24,10 +33,16 @@ def _is_nba_market(market: Dict) -> bool:
     ]
     text = " ".join(text_parts).lower()
 
-    if "nba" in text or "basketball" in text:
-        return True
+    if league == 'nba':
+        if "nba" in text or "basketball" in text:
+            return True
+        return any(team in text for team in NBA_TEAM_KEYWORDS)
+    elif league == 'nfl':
+        if "nfl" in text or "football" in text:
+            return True
+        return any(team in text for team in NFL_TEAM_KEYWORDS)
 
-    return any(team in text for team in NBA_TEAM_KEYWORDS)
+    return False
 
 
 class KalshiClient:
@@ -37,12 +52,14 @@ class KalshiClient:
         self._cache_ttl = 300  # 5 minutes
         self._last_fetch = 0
 
-    def get_nba_markets(self) -> List[Dict]:
-        """Fetch all active NBA markets from Kalshi with caching"""
+    def get_league_markets(self, league: str = 'nba') -> List[Dict]:
+        """Fetch all active markets for a league from Kalshi with caching"""
         now = time.time()
-        if self._cache and (now - self._last_fetch < self._cache_ttl):
-            print("DEBUG: Returning cached Kalshi markets")
-            return self._cache.get('markets', [])
+        cache_key = f'markets_{league}'
+        
+        if self._cache.get(cache_key) and (now - self._last_fetch < self._cache_ttl):
+            print(f"DEBUG: Returning cached Kalshi markets for {league}")
+            return self._cache.get(cache_key, [])
 
         try:
             # Pagination handling could be added here, but for now we assume <100 active NBA markets usually
@@ -59,28 +76,27 @@ class KalshiClient:
             markets = data.get('markets', [])
             print(f"DEBUG: Fetched {len(markets)} total markets from Kalshi")
             
-            # Filter for NBA games using expanded heuristics
-            nba_markets = [m for m in markets if _is_nba_market(m)]
+            # Filter for league games using expanded heuristics
+            league_markets = [m for m in markets if _is_league_market(m, league)]
 
-            if not nba_markets:
-                print("DEBUG: No NBA markets matched heuristics, returning all markets for downstream matching.")
-                # Don't cache 'all' if we failed to filter, or maybe we should? 
-                # For safety let's just return them but not cache as 'nba_markets' to force retry? 
-                # No, usually it means our heuristic failed or no markets exist.
-                # Let's cache empty if it's truly empty, or 'all' if we're unsure.
-                # If we return 'all', matching will be slow but works.
-                nba_markets = markets
-
-            print(f"DEBUG: Filtered down to {len(nba_markets)} NBA markets")
+            if not league_markets:
+                print(f"DEBUG: No {league} markets matched heuristics, returning all markets for downstream matching.")
+                league_markets = markets
+            else:
+                print(f"DEBUG: Filtered down to {len(league_markets)} {league} markets")
             
             # Update cache
-            self._cache = {'markets': nba_markets}
+            self._cache[cache_key] = league_markets
             self._last_fetch = now
             
-            return nba_markets
+            return league_markets
         except Exception as e:
             print(f"Error fetching Kalshi markets: {e}")
-            return self._cache.get('markets', []) # Return stale cache if available
+            return self._cache.get(cache_key, []) # Return stale cache if available
+    
+    # Backward compatibility alias
+    def get_nba_markets(self) -> List[Dict]:
+        return self.get_league_markets('nba')
 
     def normalize_market(self, market: Dict) -> Dict:
         """
@@ -142,6 +158,7 @@ class KalshiClient:
         for game in games:
             home = game.get('home_team_name')
             away = game.get('away_team_name')
+            league = game.get('league', 'NBA')
             if not home or not away:
                 continue
                 
@@ -162,7 +179,7 @@ class KalshiClient:
                 "volume_24h": random.randint(1000, 50000),
                 "open_interest": random.randint(500, 10000),
                 "liquidity": random.randint(10000, 100000),
-                "category": "NBA",
+                "category": league,
                 "status": "open"
             })
             
