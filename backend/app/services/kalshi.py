@@ -6,10 +6,13 @@ import time
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import List, Dict, Optional, Tuple
+import logging
 
 import requests
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import padding
+
+logger = logging.getLogger(__name__)
 
 BASE_URL = os.getenv("KALSHI_API_BASE_URL", "https://api.elections.kalshi.com")
 API_PATH_PREFIX = "/trade-api/v2"
@@ -73,15 +76,15 @@ class KalshiClient:
     def _load_private_key(self):
         key_path = os.getenv("KALSHI_PRIVATE_KEY_PATH", str(DEFAULT_PRIVATE_KEY_PATH))
         try:
-            path_obj = Path(key_path)
+            path_obj = Path(key_path).resolve()
             if not path_obj.exists():
-                print(f"DEBUG: Kalshi private key not found at {key_path}. Falling back to unauthenticated requests.")
+                logger.warning(f"Kalshi private key not found at {path_obj}. Falling back to unauthenticated requests.")
                 return None
             with path_obj.open("rb") as fh:
                 key_data = fh.read()
             return serialization.load_pem_private_key(key_data, password=None)
         except Exception as exc:
-            print(f"WARNING: Failed to load Kalshi private key: {exc}")
+            logger.warning(f"Failed to load Kalshi private key: {exc}")
             return None
 
     def _normalize_endpoint(self, endpoint: str) -> str:
@@ -125,7 +128,7 @@ class KalshiClient:
             response.raise_for_status()
             return response
         except Exception as exc:
-            print(f"Error performing Kalshi {method} {endpoint}: {exc}")
+            logger.error(f"Error performing Kalshi {method} {endpoint}: {exc}")
             raise
 
     def get_league_markets(self, league: str = 'nba') -> List[Dict]:
@@ -134,7 +137,7 @@ class KalshiClient:
         cache_key = f'markets_{league}'
         
         if self._cache.get(cache_key) and (now - self._last_fetch < self._cache_ttl):
-            print(f"DEBUG: Returning cached Kalshi markets for {league}")
+            logger.debug(f"Returning cached Kalshi markets for {league}")
             return self._cache.get(cache_key, [])
 
         try:
@@ -151,23 +154,23 @@ class KalshiClient:
             response = self._request("GET", "/markets", params=params)
             data = response.json()
             markets = data.get('markets', [])
-            print(f"DEBUG: Fetched {len(markets)} total markets from Kalshi for {league.upper()}")
+            logger.debug(f"Fetched {len(markets)} total markets from Kalshi for {league.upper()}")
 
             if not markets and series_ticker:
-                print(f"DEBUG: Series ticker {series_ticker} returned no markets. Falling back to broad fetch.")
+                logger.debug(f"Series ticker {series_ticker} returned no markets. Falling back to broad fetch.")
                 response = self._request("GET", "/markets", params={"status": "open", "limit": 500})
                 markets = response.json().get('markets', [])
 
             if series_ticker:
                 league_markets = markets
-                print(f"DEBUG: Retrieved {len(league_markets)} {league.upper()} markets via {series_ticker}")
+                logger.debug(f"Retrieved {len(league_markets)} {league.upper()} markets via {series_ticker}")
             else:
                 league_markets = [m for m in markets if _is_league_market(m, league)]
                 if not league_markets:
-                    print(f"DEBUG: No {league} markets matched heuristics, returning all markets for downstream matching.")
+                    logger.debug(f"No {league} markets matched heuristics, returning all markets for downstream matching.")
                     league_markets = markets
                 else:
-                    print(f"DEBUG: Filtered down to {len(league_markets)} {league} markets")
+                    logger.debug(f"Filtered down to {len(league_markets)} {league} markets")
             
             # Update cache
             self._cache[cache_key] = league_markets
@@ -175,7 +178,7 @@ class KalshiClient:
             
             return league_markets
         except Exception as e:
-            print(f"Error fetching Kalshi markets: {e}")
+            logger.error(f"Error fetching Kalshi markets: {e}")
             return self._cache.get(cache_key, []) # Return stale cache if available
     
     # Backward compatibility alias
@@ -233,116 +236,6 @@ class KalshiClient:
         
         # Midpoint if no last price
         return (yes_bid + yes_ask) / 200.0
-
-    # --- Synthetic market fallbacks ---------------------------------------
-
-    @staticmethod
-    def _team_token_variants(name: str, abbr: str) -> List[str]:
-        tokens = set()
-        if name:
-            clean = re.sub(r'[^a-z0-9 ]', ' ', name.lower())
-            parts = [p for p in clean.split() if p]
-            tokens.update(parts)
-            if parts:
-                tokens.add(parts[-1])  # mascot (e.g. celtics)
-                tokens.add("".join(parts))  # combined city+mascot
-        if abbr:
-            tokens.add(abbr.lower())
-        return list(tokens)
-
-    @classmethod
-    def _token_matches_team(cls, token: str, name: str, abbr: str) -> bool:
-        if not token:
-            return False
-        token = token.lower()
-        return token in cls._team_token_variants(name or "", abbr or "")
-
-    @classmethod
-    def _extract_spread(cls, spread_str: Optional[str]) -> Optional[Tuple[str, float]]:
-        if not spread_str or spread_str == "N/A":
-            return None
-        spread_str = str(spread_str).strip()
-        match = re.match(r'([A-Za-z]+)[\s@-]*([+-]?\d+(?:\.\d+)?)', spread_str)
-        if not match:
-            return None
-        token = match.group(1)
-        try:
-            spread_val = abs(float(match.group(2)))
-        except ValueError:
-            return None
-        return token.lower(), spread_val
-
-    @classmethod
-    def _estimate_home_prob(cls, game: Dict) -> float:
-        odds = (game.get('odds') or {})
-        spread_meta = cls._extract_spread(odds.get('spread'))
-        home_name = game.get('home_team_name', '')
-        away_name = game.get('away_team_name', '')
-        home_abbr = game.get('home_team_abbrev', '')
-        away_abbr = game.get('away_team_abbrev', '')
-
-        if not spread_meta:
-            return 0.5
-
-        fav_token, spread_pts = spread_meta
-        home_is_fav = cls._token_matches_team(fav_token, home_name, home_abbr)
-        away_is_fav = cls._token_matches_team(fav_token, away_name, away_abbr)
-
-        if not home_is_fav and not away_is_fav:
-            return 0.5
-
-        # Convert spread to probability via logistic approximation (6.5 ~ NBA possession delta)
-        signed_pts = spread_pts if home_is_fav else -spread_pts
-        prob = 1 / (1 + math.exp(-signed_pts / 6.5))
-        return max(0.05, min(0.95, prob))
-
-    def generate_synthetic_markets_for_games(self, games: List[Dict]) -> List[Dict]:
-        """
-        Produce deterministic single-team markets derived from the ESPN spreads.
-        This keeps downstream logic intact without relying on random mocks.
-        """
-        markets = []
-        for game in games:
-            home = game.get('home_team_name')
-            away = game.get('away_team_name')
-            if not home or not away:
-                continue
-
-            game_id = str(game.get('game_id') or f"{home[:3]}{away[:3]}")
-            base_title = f"{away} at {home}"
-            home_prob = self._estimate_home_prob(game)
-            away_prob = 1 - home_prob
-
-            def build_market(suffix: str, subject: str, prob: float) -> Dict:
-                price = int(round(prob * 100))
-                yes_bid = max(1, min(98, price - 2))
-                yes_ask = max(2, min(99, price + 2))
-                volume = int(200 + abs(prob - 0.5) * 2000)
-                return {
-                    "ticker": f"SYN-{game_id}-{suffix}",
-                    "event_ticker": f"SYN-{game_id}",
-                    "title": f"{base_title} (synthetic)",
-                    "subtitle": subject,
-                    "last_price": price,
-                    "yes_bid": yes_bid,
-                    "yes_ask": yes_ask,
-                    "volume_24h": volume,
-                    "open_interest": volume // 2,
-                    "liquidity": volume * 50,
-                    "category": "synthetic",
-                    "status": "open"
-                }
-
-            markets.append(build_market("HOME", home, home_prob))
-            markets.append(build_market("AWAY", away, away_prob))
-        return markets
-
-    def generate_mock_markets_for_games(self, games: List[Dict]) -> List[Dict]:
-        """
-        Legacy helper kept for backwards compatibility/tests.
-        Prefers deterministic synthetic data built from spreads.
-        """
-        return self.generate_synthetic_markets_for_games(games)
 
     def get_market_details(self, market: Dict) -> Dict:
         """Extract rich market details for the UI"""

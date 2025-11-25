@@ -1,13 +1,19 @@
-import React, { useEffect, useState, useRef, useCallback } from 'react';
+import React, { useEffect, useState, useRef, useCallback, lazy, Suspense } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { api, type Game, type League } from '../lib/api';
+import { type Game, type League } from '../lib/api';
 import { useFilterStore } from '../lib/store';
+import { useGameContext } from '../contexts/GameContext';
 import GameCard from './GameCard';
-import GameAnalyticsModal from './GameAnalyticsModal';
 import InsightsPanel from './charts/InsightsPanel';
-import { RefreshCw, Zap, Filter, Settings, BarChart3, AlertTriangle, Bell, X } from 'lucide-react';
+import { RefreshCw, Zap, Filter, Settings, BarChart3, AlertTriangle, Bell, X, TrendingUp, CheckCircle, HelpCircle } from 'lucide-react';
 import { cn } from './ui/shared';
+import { GameCardSkeleton, InsightsPanelSkeleton, GameAnalyticsModalSkeleton } from './ui/skeletons';
 import { ResponsiveContainer, ScatterChart, Scatter, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, ZAxis, Cell } from 'recharts';
+
+// Lazy load heavy components for better initial load performance
+const GameAnalyticsModal = lazy(() => import('./GameAnalyticsModal'));
+const StrategyLab = lazy(() => import('./StrategyLab'));
+const HelpGuide = lazy(() => import('./HelpGuide'));
 
 type EdgeAlert = {
     id: string;
@@ -18,86 +24,51 @@ type EdgeAlert = {
 };
 
 const Dashboard: React.FC = () => {
-    const [games, setGames] = useState<Game[]>([]);
-    const [loading, setLoading] = useState(true);
-    const [error, setError] = useState<string | null>(null);
-    const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
-    const [autoRefreshEnabled, setAutoRefreshEnabled] = useState(true);
-    const [refreshIntervalMinutes, setRefreshIntervalMinutes] = useState<5 | 10>(5);
-    const [nextRefreshTime, setNextRefreshTime] = useState<Date | null>(null);
-    const [refreshCountdown, setRefreshCountdown] = useState('');
-    const [isRefreshing, setIsRefreshing] = useState(false);
-    const [lastRefreshTrigger, setLastRefreshTrigger] = useState(Date.now());
+    // Get all game-related state and functions from context
+    const {
+        games,
+        loading,
+        error,
+        lastUpdated,
+        isRefreshing,
+        refreshGames,
+        selectedGame,
+        selectedGameDetails,
+        selectedGameLoading,
+        selectedGameError,
+        setSelectedGame,
+        clearSelectedGame,
+        refreshSelectedGame,
+        autoRefreshEnabled,
+        setAutoRefreshEnabled,
+        refreshIntervalMinutes,
+        setRefreshIntervalMinutes,
+        refreshCountdown,
+        getGameStats,
+        isSyncing, // New sync state
+        syncError,
+    } = useGameContext();
+
+    // Debounce refresh
+    const handleRefresh = useCallback(() => {
+        if (isRefreshing || isSyncing) return;
+        refreshGames();
+    }, [isRefreshing, isSyncing, refreshGames]);
+
+    // Local UI state
     const [showToolbox, setShowToolbox] = useState(false);
     const [edgeAlertsEnabled, setEdgeAlertsEnabled] = useState(false);
     const [edgeThreshold, setEdgeThreshold] = useState(0.15);
     const [edgeAlerts, setEdgeAlerts] = useState<EdgeAlert[]>([]);
     const [showHeatmap, setShowHeatmap] = useState(false);
     const [showRiskCalc, setShowRiskCalc] = useState(false);
-    const [selectedGame, setSelectedGame] = useState<Game | null>(null);
+    const [showStrategyLab, setShowStrategyLab] = useState(false);
+    const [showHelpGuide, setShowHelpGuide] = useState(false);
     const isElectron = typeof navigator !== 'undefined' && navigator.userAgent.includes('Electron');
     const alertedGameIdsRef = useRef<Set<string>>(new Set());
-    const hasLoadedInitialRef = useRef(false);
-    const autoRefreshTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-    const clearAutoRefreshTimeout = useCallback(() => {
-        if (autoRefreshTimeoutRef.current) {
-            clearTimeout(autoRefreshTimeoutRef.current);
-            autoRefreshTimeoutRef.current = null;
-        }
-    }, []);
 
     // Store
     const { minConfidence, sortBy, league, setFilter } = useFilterStore();
-
-    const fetchGames = useCallback(async () => {
-        try {
-            setIsRefreshing(true);
-            if (!hasLoadedInitialRef.current) setLoading(true);
-            setError(null);
-            const data = await api.getGames(sortBy, league);
-            setGames(data);
-            setLastUpdated(new Date());
-            hasLoadedInitialRef.current = true;
-        } catch (err) {
-            console.error("Failed to fetch games:", err);
-            setError("Failed to connect to prediction engine.");
-        } finally {
-            setLoading(false);
-            setIsRefreshing(false);
-            setLastRefreshTrigger(Date.now());
-        }
-    }, [sortBy, league]);
-
-    useEffect(() => {
-        setGames([]);
-        setLoading(true);
-        setError(null);
-        hasLoadedInitialRef.current = false;
-        fetchGames();
-        return () => clearAutoRefreshTimeout();
-    }, [fetchGames, clearAutoRefreshTimeout]);
-
-    // Load auto-refresh preferences
-    useEffect(() => {
-        if (typeof window === 'undefined') return;
-        try {
-            const stored = localStorage.getItem('kalshi-auto-refresh');
-            if (stored) {
-                const parsed = JSON.parse(stored);
-                if (typeof parsed.enabled === 'boolean') setAutoRefreshEnabled(parsed.enabled);
-                if (parsed.interval === 10) setRefreshIntervalMinutes(10);
-            }
-        } catch (err) {
-            console.warn('Failed to load auto-refresh preferences', err);
-        }
-    }, []);
-
-    useEffect(() => {
-        if (typeof window === 'undefined') return;
-        const payload = JSON.stringify({ enabled: autoRefreshEnabled, interval: refreshIntervalMinutes });
-        localStorage.setItem('kalshi-auto-refresh', payload);
-    }, [autoRefreshEnabled, refreshIntervalMinutes]);
 
     // Persist toolbox preferences
     useEffect(() => {
@@ -132,47 +103,6 @@ const Dashboard: React.FC = () => {
         setEdgeAlerts([]);
     }, [edgeThreshold]);
 
-    useEffect(() => {
-        clearAutoRefreshTimeout();
-        if (!autoRefreshEnabled) {
-            setNextRefreshTime(null);
-            return;
-        }
-
-        const intervalMs = refreshIntervalMinutes * 60000;
-        const scheduledTime = new Date(lastRefreshTrigger + intervalMs);
-        setNextRefreshTime(scheduledTime);
-        const delay = Math.max(scheduledTime.getTime() - Date.now(), 0);
-
-        autoRefreshTimeoutRef.current = setTimeout(() => {
-            fetchGames();
-        }, delay);
-
-        return () => clearAutoRefreshTimeout();
-    }, [autoRefreshEnabled, refreshIntervalMinutes, lastRefreshTrigger, fetchGames, clearAutoRefreshTimeout]);
-
-    useEffect(() => {
-        if (!autoRefreshEnabled || !nextRefreshTime) {
-            setRefreshCountdown('');
-            return;
-        }
-
-        const updateCountdown = () => {
-            const diff = nextRefreshTime.getTime() - Date.now();
-            if (diff <= 0) {
-                setRefreshCountdown('now');
-                return;
-            }
-            const minutes = Math.floor(diff / 60000);
-            const seconds = Math.floor((diff % 60000) / 1000);
-            setRefreshCountdown(`${minutes}:${seconds.toString().padStart(2, '0')}`);
-        };
-
-        updateCountdown();
-        const id = setInterval(updateCountdown, 1000);
-        return () => clearInterval(id);
-    }, [autoRefreshEnabled, nextRefreshTime]);
-
     // Edge detection loop
     useEffect(() => {
         if (!edgeAlertsEnabled || games.length === 0) return;
@@ -201,18 +131,45 @@ const Dashboard: React.FC = () => {
         alertedGameIdsRef.current.clear();
     };
 
-    // Filtering Logic
-    const filteredGames = games.filter(game => {
+    // Filtering Logic (Memoized)
+    const filteredGames = React.useMemo(() => games.filter(game => {
         if (minConfidence === "HIGH" && game.prediction.confidence_score !== "HIGH") return false;
         if (minConfidence === "MEDIUM" && game.prediction.confidence_score === "LOW") return false;
         return true;
-    });
+    }), [games, minConfidence]);
 
-    const stats = {
-        total: games.length,
-        highConf: games.filter(g => g.prediction.confidence_score === "HIGH").length,
-        opportunities: games.filter(g => g.prediction.divergence > 0.15).length
-    };
+    // Get stats from context (Memoized) - only recalculate when games change
+    const stats = React.useMemo(() => {
+        const total = games.length;
+        const highConf = games.filter(g => g.prediction.confidence_score === "HIGH").length;
+        const opportunities = games.filter(g => g.prediction.divergence > 0.15).length;
+        const avgDivergence = games.length > 0
+            ? games.reduce((sum, g) => sum + Math.abs(g.prediction.divergence), 0) / games.length
+            : 0;
+        const totalVolume = games.reduce((sum, g) => sum + (g.market_data.volume || 0), 0);
+        
+        return {
+            total,
+            highConf,
+            opportunities,
+            avgDivergence,
+            totalVolume
+        };
+    }, [games]);
+
+    const handleSelectGame = useCallback((game: Game) => {
+        setSelectedGame(game);
+    }, [setSelectedGame]);
+
+    const handleCloseSelectedGame = useCallback(() => {
+        clearSelectedGame();
+    }, [clearSelectedGame]);
+
+    const handleRetrySelectedGame = useCallback(() => {
+        if (selectedGame) {
+            refreshSelectedGame();
+        }
+    }, [selectedGame, refreshSelectedGame]);
 
     return (
         <div className="min-h-screen bg-background text-white font-sans selection:bg-primary/30">
@@ -228,25 +185,33 @@ const Dashboard: React.FC = () => {
                         </div>
                         <div className="flex flex-col leading-none">
                             <span className="font-bold text-lg tracking-tight text-white">Kalshi<span className="text-zinc-500">Predictor</span></span>
-                            <span className="text-[10px] text-primary font-medium tracking-wider uppercase">Pro v2.0</span>
+                            <span className="text-[10px] text-primary font-medium tracking-wider uppercase">Pro v3.0</span>
                         </div>
                     </div>
                     
                     <div className="flex items-center gap-4">
-                        <div className="hidden md:flex items-center gap-6 mr-4 border-r border-zinc-800 pr-6">
-                            <div className="text-center">
-                                <div className="text-xs text-zinc-500 font-medium">Games</div>
-                                <div className="text-sm font-bold text-white">{stats.total}</div>
+                        <div className="hidden md:flex items-center gap-8 mr-6 border-r border-zinc-800 pr-8">
+                            <div className="text-center group">
+                                <div className="text-[10px] text-zinc-500 font-semibold uppercase tracking-wider group-hover:text-zinc-400 transition-colors">Games</div>
+                                <div className="text-base font-bold text-white">{stats.total}</div>
                             </div>
-                            <div className="text-center">
-                                <div className="text-xs text-zinc-500 font-medium">High Conf</div>
-                                <div className="text-sm font-bold text-primary">{stats.highConf}</div>
+                            <div className="text-center group">
+                                <div className="text-[10px] text-zinc-500 font-semibold uppercase tracking-wider group-hover:text-zinc-400 transition-colors">High Conf</div>
+                                <div className="text-base font-bold text-primary">{stats.highConf}</div>
                             </div>
-                            <div className="text-center">
-                                <div className="text-xs text-zinc-500 font-medium">Opportunities</div>
-                                <div className="text-sm font-bold text-amber-400">{stats.opportunities}</div>
+                            <div className="text-center group">
+                                <div className="text-[10px] text-zinc-500 font-semibold uppercase tracking-wider group-hover:text-zinc-400 transition-colors">Oppty</div>
+                                <div className="text-base font-bold text-amber-400">{stats.opportunities}</div>
                             </div>
                         </div>
+
+                        <button 
+                            onClick={() => setShowHelpGuide(true)}
+                            className="p-2 rounded-lg hover:bg-surface_highlight transition-all text-zinc-400 hover:text-white"
+                            title="Help & Guide"
+                        >
+                            <HelpCircle size={18} />
+                        </button>
 
                         <button 
                             onClick={() => setShowToolbox(!showToolbox)}
@@ -257,9 +222,10 @@ const Dashboard: React.FC = () => {
                         </button>
 
                         <button 
-                            onClick={() => fetchGames()} 
-                            className={cn("p-2 rounded-lg hover:bg-surface_highlight transition-all text-zinc-400 hover:text-white", isRefreshing && "animate-spin")}
+                            onClick={handleRefresh} 
+                            className={cn("p-2 rounded-lg hover:bg-surface_highlight transition-all text-zinc-400 hover:text-white", (isRefreshing || isSyncing) && "animate-spin")}
                             title="Refresh"
+                            disabled={isRefreshing || isSyncing}
                         >
                             <RefreshCw size={18} />
                         </button>
@@ -338,10 +304,15 @@ const Dashboard: React.FC = () => {
                                 </label>
                                 <select
                                     value={refreshIntervalMinutes}
-                                    onChange={(e) => setRefreshIntervalMinutes(Number(e.target.value) as 5 | 10)}
-                                    className="bg-transparent border border-zinc-800 rounded-md text-[11px] font-semibold uppercase tracking-wider px-2 py-1 text-zinc-300"
+                                    onChange={(e) => setRefreshIntervalMinutes(Number(e.target.value) as 0.5 | 1 | 5 | 10)}
+                                    className={cn(
+                                        "bg-transparent border border-zinc-800 rounded-md text-[11px] font-semibold uppercase tracking-wider px-2 py-1",
+                                        refreshIntervalMinutes <= 1 ? "text-emerald-400 border-emerald-500/30" : "text-zinc-300"
+                                    )}
                                     disabled={!autoRefreshEnabled}
                                 >
+                                    <option value={0.5}>30s (Live)</option>
+                                    <option value={1}>1 min</option>
                                     <option value={5}>5 min</option>
                                     <option value={10}>10 min</option>
                                 </select>
@@ -449,6 +420,19 @@ const Dashboard: React.FC = () => {
                                         </button>
                                     </div>
                                 </div>
+                                <div className="p-4 rounded-lg bg-zinc-900 border border-zinc-800 flex items-start gap-3">
+                                    <TrendingUp className="text-purple-400 mt-1" size={16} />
+                                    <div>
+                                        <h4 className="text-sm font-bold text-white">Strategy Lab</h4>
+                                        <p className="text-xs text-zinc-500 mt-1">Backtest & simulate strategies.</p>
+                                        <button
+                                            className="mt-2 text-[10px] bg-zinc-800 hover:bg-zinc-700 px-3 py-1.5 rounded border border-zinc-700 transition-colors"
+                                            onClick={() => setShowStrategyLab(true)}
+                                        >
+                                            Open Lab
+                                        </button>
+                                    </div>
+                                </div>
                             </div>
                         </motion.div>
                     )}
@@ -457,23 +441,51 @@ const Dashboard: React.FC = () => {
 
             {/* Main Content */}
             <main className="max-w-7xl mx-auto px-6 py-8">
-                {/* Insights Panel - Only show if we have data */}
-                {!loading && games.length > 0 && (
+                {/* Insights Panel - Show skeleton when loading, content when loaded */}
+                {loading && games.length === 0 ? (
                     <>
                         <div className="flex justify-between items-center text-xs text-zinc-500 mb-3">
                             <span>Insights</span>
-                            {lastUpdated && (
-                                <span>Updated {lastUpdated.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
-                            )}
+                            <div className="flex items-center gap-3">
+                                <span className="text-zinc-500">Loading...</span>
+                            </div>
+                        </div>
+                        <InsightsPanelSkeleton />
+                    </>
+                ) : !loading && games.length > 0 && (
+                    <>
+                        <div className="flex justify-between items-center text-xs text-zinc-500 mb-3">
+                            <span>Insights</span>
+                            <div className="flex items-center gap-3">
+                                {isSyncing && (
+                                    <span className="text-emerald-400 flex items-center gap-1">
+                                        <RefreshCw size={10} className="animate-spin" /> Syncing...
+                                    </span>
+                                )}
+                                {!isSyncing && !syncError && lastUpdated && (
+                                    <span className="text-emerald-500 flex items-center gap-1">
+                                        <CheckCircle size={10} /> Synced
+                                    </span>
+                                )}
+                                {syncError && !isSyncing && (
+                                    <span className="text-red-400 flex items-center gap-1" title={syncError}>
+                                        <AlertTriangle size={10} /> Sync Error
+                                    </span>
+                                )}
+                                {lastUpdated && (
+                                    <span>Updated {lastUpdated.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+                                )}
+                            </div>
                         </div>
                         <InsightsPanel games={games} />
                     </>
                 )}
 
+                {/* Games Grid - Show skeleton when loading, content when loaded */}
                 {loading && games.length === 0 ? (
                     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                         {[1, 2, 3, 4, 5, 6].map((i) => (
-                            <div key={i} className="h-72 bg-surface rounded-xl animate-pulse border border-zinc-800" />
+                            <GameCardSkeleton key={i} />
                         ))}
                     </div>
                 ) : error ? (
@@ -484,7 +496,7 @@ const Dashboard: React.FC = () => {
                         <h3 className="text-xl font-bold text-white mb-2">Connection Error</h3>
                         <p className="text-zinc-500 max-w-md mb-6">{error}</p>
                         <button 
-                            onClick={() => fetchGames()}
+                            onClick={() => refreshGames()}
                             className="px-4 py-2 bg-zinc-800 hover:bg-zinc-700 text-white rounded-lg font-medium transition-colors"
                         >
                             Try Again
@@ -500,8 +512,8 @@ const Dashboard: React.FC = () => {
                             {filteredGames.map((game) => (
                                 <GameCard 
                                     key={game.game_id} 
-                                    game={game} 
-                                    onClick={() => setSelectedGame(game)}
+                                    game={game}
+                                    onSelect={handleSelectGame}
                                 />
                             ))}
                         </AnimatePresence>
@@ -511,12 +523,45 @@ const Dashboard: React.FC = () => {
 
             <MarketHeatmapModal open={showHeatmap} onClose={() => setShowHeatmap(false)} games={games} />
             <RiskCalculatorModal open={showRiskCalc} onClose={() => setShowRiskCalc(false)} />
+            <Suspense fallback={null}>
+                <StrategyLab open={showStrategyLab} onClose={() => setShowStrategyLab(false)} games={games} />
+                <HelpGuide open={showHelpGuide} onClose={() => setShowHelpGuide(false)} />
+            </Suspense>
             <AnimatePresence>
                 {selectedGame && (
-                    <GameAnalyticsModal 
-                        game={selectedGame} 
-                        onClose={() => setSelectedGame(null)} 
-                    />
+                    <Suspense fallback={
+                        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
+                            <div className="text-white">Loading game details...</div>
+                        </div>
+                    }>
+                        {selectedGameDetails ? (
+                            <GameAnalyticsModal 
+                                key={selectedGame.game_id}
+                                game={selectedGameDetails}
+                                loading={selectedGameLoading}
+                                error={selectedGameError}
+                                onRetry={handleRetrySelectedGame}
+                                onClose={handleCloseSelectedGame}
+                            />
+                        ) : selectedGameLoading ? (
+                            <motion.div
+                                initial={{ opacity: 0 }}
+                                animate={{ opacity: 1 }}
+                                exit={{ opacity: 0 }}
+                                className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm"
+                                onClick={handleCloseSelectedGame}
+                            >
+                                <motion.div
+                                    initial={{ scale: 0.95, opacity: 0, y: 20 }}
+                                    animate={{ scale: 1, opacity: 1, y: 0 }}
+                                    exit={{ scale: 0.95, opacity: 0, y: 20 }}
+                                    onClick={(e) => e.stopPropagation()}
+                                >
+                                    <GameAnalyticsModalSkeleton />
+                                </motion.div>
+                            </motion.div>
+                        ) : null}
+                    </Suspense>
                 )}
             </AnimatePresence>
             <EdgeAlertsTray alerts={edgeAlerts} visible={edgeAlertsEnabled} onDismiss={handleClearAlerts} />

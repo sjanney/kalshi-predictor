@@ -23,6 +23,11 @@
     0% { transform: translateY(10px); opacity: 0; }
     100% { transform: translateY(0); opacity: 1; }
   }
+  
+  @keyframes shimmer {
+    0% { transform: translateX(-100%); }
+    100% { transform: translateX(100%); }
+  }
 }
 
 :root {
@@ -76,4 +81,22 @@ body {
 
 ::-webkit-scrollbar-thumb:hover {
   background: #3f3f46;
+}
+
+/* Chart Performance Optimizations */
+.chart-container {
+  will-change: transform;
+  transform: translateZ(0); /* Force GPU acceleration */
+  backface-visibility: hidden;
+  perspective: 1000px;
+}
+
+/* Optimize recharts rendering */
+.recharts-wrapper {
+  will-change: transform;
+  transform: translateZ(0);
+}
+
+.recharts-surface {
+  will-change: contents;
 }
