@@ -1,16 +1,58 @@
-import React from 'react';
+import React, { memo, useCallback, useRef } from 'react';
 import { motion } from 'framer-motion';
-import type { Game } from '../lib/api';
+import type { Game, Injury, League } from '../lib/api';
+import { api } from '../lib/api';
 import { Card, Badge, cn } from './ui/shared';
-import { TrendingUp, TrendingDown, Activity, BarChart2, DollarSign } from 'lucide-react';
+import { TrendingUp, TrendingDown, Activity, BarChart2, DollarSign, UserMinus } from 'lucide-react';
 
 interface GameCardProps {
     game: Game;
-    onClick?: () => void;
+    onSelect?: (game: Game) => void;
 }
 
-const GameCard: React.FC<GameCardProps> = ({ game, onClick }) => {
-    const { prediction, factors, market_data, league } = game;
+// Prefetch cache for game details
+const prefetchCache = new Map<string, Promise<Game>>();
+const PREFETCH_DELAY = 500; // Wait 500ms before prefetching
+
+const GameCardComponent: React.FC<GameCardProps> = ({ game, onSelect }) => {
+    const prefetchTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+    
+    // Prefetch game details on hover
+    const handleMouseEnter = useCallback(() => {
+        // Clear any existing timeout
+        if (prefetchTimeoutRef.current) {
+            clearTimeout(prefetchTimeoutRef.current);
+        }
+        
+        // Prefetch after a short delay to avoid prefetching on accidental hovers
+        prefetchTimeoutRef.current = setTimeout(() => {
+            const gameId = game.game_id;
+            const league = (game.league || 'nba') as League;
+            
+            // Check if already prefetched or in progress
+            if (prefetchCache.has(gameId)) {
+                return;
+            }
+            
+            // Start prefetch
+            const prefetchPromise = api.getGameDetails(gameId, { league })
+                .catch(() => {
+                    // Silently fail - prefetch errors shouldn't break the UI
+                    prefetchCache.delete(gameId);
+                });
+            
+            prefetchCache.set(gameId, prefetchPromise);
+        }, PREFETCH_DELAY);
+    }, [game.game_id, game.league]);
+    
+    const handleMouseLeave = useCallback(() => {
+        // Clear prefetch timeout if user moves mouse away
+        if (prefetchTimeoutRef.current) {
+            clearTimeout(prefetchTimeoutRef.current);
+            prefetchTimeoutRef.current = null;
+        }
+    }, []);
+    const { prediction, factors, market_data, league, market_context } = game;
     const homeModelProb = prediction.stat_model_prob;
     const awayModelProb = 1 - homeModelProb;
     const homeFinalProb = prediction.home_win_prob;
@@ -20,6 +62,32 @@ const GameCard: React.FC<GameCardProps> = ({ game, onClick }) => {
         prediction.recommendation.includes("Follow") ? "text-emerald-400" :
         prediction.recommendation.includes("Fade") ? "text-amber-400" :
         "text-zinc-400";
+    
+    // Extract injury counts and impact
+    const homeInjuries: Injury[] = market_context?.injuries?.home || [];
+    const awayInjuries: Injury[] = market_context?.injuries?.away || [];
+    const homeInjuryCount = homeInjuries.length;
+    const awayInjuryCount = awayInjuries.length;
+    
+    // Get injury impact data
+    const homeImpact = market_context?.injury_impact?.home;
+    const awayImpact = market_context?.injury_impact?.away;
+    
+    // Check if teams have players "Out" (most significant)
+    const homeHasOutPlayers = homeInjuries.some((inj: Injury) => inj.status === 'Out');
+    const awayHasOutPlayers = awayInjuries.some((inj: Injury) => inj.status === 'Out');
+    
+    // Check for critical injuries
+    const homeCritical = homeImpact?.severity === 'CRITICAL' || homeImpact?.severity === 'HIGH';
+    const awayCritical = awayImpact?.severity === 'CRITICAL' || awayImpact?.severity === 'HIGH';
+
+    // Determine if game is live or final
+    const isFinal = game.status?.toLowerCase().includes('final');
+    const isScheduled = !game.status || game.status?.includes('PM') || game.status?.includes('AM') || game.status === 'Scheduled';
+    const isLive = !isFinal && !isScheduled;
+    
+    // Parse scores (ensure they exist)
+    const showScores = (isLive || isFinal) && (game.home_score !== undefined && game.away_score !== undefined);
 
     return (
         <motion.div
@@ -28,26 +96,51 @@ const GameCard: React.FC<GameCardProps> = ({ game, onClick }) => {
             viewport={{ once: true }}
             transition={{ duration: 0.4 }}
             whileHover={{ y: -5 }}
+            onMouseEnter={handleMouseEnter}
+            onMouseLeave={handleMouseLeave}
         >
-            <Card onClick={onClick} className="group relative hover:shadow-xl hover:shadow-black/50 hover:border-zinc-700 transition-all duration-300">
+            <Card onClick={() => onSelect?.(game)} className="group relative hover:shadow-xl hover:shadow-black/50 hover:border-zinc-700 transition-all duration-300">
                 <div className="absolute -top-3 left-4">
-                    <Badge variant="outline" className="text-[9px] tracking-[0.2em]">
+                    <Badge variant="outline" className="text-[9px] tracking-[0.2em] font-bold bg-background border-zinc-700">
                         {league?.toUpperCase() ?? 'NBA'}
                     </Badge>
                 </div>
-                {/* Divergence Badge (Absolute) */}
-                {prediction.divergence > 0.15 && (
-                    <motion.div 
-                        initial={{ scale: 0.8, opacity: 0 }}
-                        animate={{ scale: 1, opacity: 1 }}
-                        className="absolute top-0 right-0 p-3 z-10"
-                    >
-                        <Badge variant="warning" className="flex items-center gap-1 shadow-sm animate-pulse">
-                            <Activity size={10} />
-                            <span>{Math.round(prediction.divergence * 100)}% EDGE</span>
-                        </Badge>
-                    </motion.div>
-                )}
+                {/* Injury Alert & Divergence Badges (Absolute - Top Right) */}
+                <div className="absolute top-2 right-2 flex gap-1.5 z-10">
+                    {(homeCritical || awayCritical) && (
+                        <motion.div 
+                            initial={{ scale: 0.8, opacity: 0 }}
+                            animate={{ scale: 1, opacity: 1 }}
+                        >
+                            <Badge variant="danger" className="flex items-center gap-1 shadow-sm animate-pulse">
+                                <UserMinus size={10} />
+                                <span>CRITICAL INJ</span>
+                            </Badge>
+                        </motion.div>
+                    )}
+                    {(homeHasOutPlayers || awayHasOutPlayers) && !homeCritical && !awayCritical && (
+                        <motion.div 
+                            initial={{ scale: 0.8, opacity: 0 }}
+                            animate={{ scale: 1, opacity: 1 }}
+                        >
+                            <Badge variant="danger" className="flex items-center gap-1 shadow-sm">
+                                <UserMinus size={10} />
+                                <span>INJ</span>
+                            </Badge>
+                        </motion.div>
+                    )}
+                    {prediction.divergence > 0.15 && (
+                        <motion.div 
+                            initial={{ scale: 0.8, opacity: 0 }}
+                            animate={{ scale: 1, opacity: 1 }}
+                        >
+                            <Badge variant="warning" className="flex items-center gap-1 shadow-sm animate-pulse">
+                                <Activity size={10} />
+                                <span>{Math.round(prediction.divergence * 100)}% EDGE</span>
+                            </Badge>
+                        </motion.div>
+                    )}
+                </div>
 
                 <div className="p-5">
                     {/* Teams Header */}
@@ -55,18 +148,78 @@ const GameCard: React.FC<GameCardProps> = ({ game, onClick }) => {
                         <div className="flex flex-col gap-1 w-full">
                             <div className="flex items-center justify-between w-full">
                                 <div className="flex items-center gap-2">
-                                    <span className="text-xs font-mono text-zinc-500">{game.status}</span>
+                                    <span className="text-xs font-mono text-zinc-500 flex items-center gap-2">
+                                        {isLive && (
+                                            <span className="flex items-center gap-1 text-red-500 font-bold animate-pulse">
+                                                <span className="w-1.5 h-1.5 rounded-full bg-red-500"></span>
+                                                LIVE
+                                            </span>
+                                        )}
+                                        {game.status}
+                                    </span>
                                 </div>
                             </div>
                             
                             <div className="flex flex-col gap-1 mt-1">
                                 <div className="flex items-center justify-between gap-4">
-                                    <span className="text-lg font-bold text-white tracking-tight">{game.away_team}</span>
-                                    <span className="text-xs text-zinc-600 font-mono">{factors.away_record}</span>
+                                    <div className="flex items-center gap-2 flex-1">
+                                        <span className="text-lg font-bold text-white tracking-tight">{game.away_team}</span>
+                                        {awayInjuryCount > 0 && (
+                                            <div 
+                                                className={cn(
+                                                    "flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium",
+                                                    awayCritical
+                                                        ? "bg-rose-500/30 text-rose-300 border border-rose-500/50 animate-pulse"
+                                                        : awayHasOutPlayers
+                                                        ? "bg-rose-500/20 text-rose-400 border border-rose-500/30"
+                                                        : "bg-amber-500/20 text-amber-400 border border-amber-500/30"
+                                                )}
+                                                title={`${awayInjuryCount} injury${awayInjuryCount > 1 ? 's' : ''}${awayImpact ? ` - Impact: ${awayImpact.total_impact.toFixed(1)} (${awayImpact.severity})` : ''} - ${awayInjuries.map((i: Injury) => `${i.player_name} (${i.status})`).join(', ')}`}
+                                            >
+                                                <UserMinus size={10} />
+                                                <span>{awayInjuryCount}</span>
+                                                {awayImpact && awayImpact.total_impact > 0 && (
+                                                    <span className="text-[9px] opacity-75">({awayImpact.total_impact.toFixed(1)})</span>
+                                                )}
+                                            </div>
+                                        )}
+                                    </div>
+                                    <div className="flex items-center gap-3">
+                                        {showScores && (
+                                            <span className="text-lg font-bold text-white">{game.away_score}</span>
+                                        )}
+                                        <span className="text-xs text-zinc-600 font-mono">{factors.away_record}</span>
+                                    </div>
                                 </div>
                                 <div className="flex items-center justify-between gap-4">
-                                    <span className="text-lg font-bold text-white tracking-tight">{game.home_team}</span>
-                                    <span className="text-xs text-zinc-600 font-mono">{factors.home_record}</span>
+                                    <div className="flex items-center gap-2 flex-1">
+                                        <span className="text-lg font-bold text-white tracking-tight">{game.home_team}</span>
+                                        {homeInjuryCount > 0 && (
+                                            <div 
+                                                className={cn(
+                                                    "flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium",
+                                                    homeCritical
+                                                        ? "bg-rose-500/30 text-rose-300 border border-rose-500/50 animate-pulse"
+                                                        : homeHasOutPlayers
+                                                        ? "bg-rose-500/20 text-rose-400 border border-rose-500/30"
+                                                        : "bg-amber-500/20 text-amber-400 border border-amber-500/30"
+                                                )}
+                                                title={`${homeInjuryCount} injury${homeInjuryCount > 1 ? 's' : ''}${homeImpact ? ` - Impact: ${homeImpact.total_impact.toFixed(1)} (${homeImpact.severity})` : ''} - ${homeInjuries.map((i: Injury) => `${i.player_name} (${i.status})`).join(', ')}`}
+                                            >
+                                                <UserMinus size={10} />
+                                                <span>{homeInjuryCount}</span>
+                                                {homeImpact && homeImpact.total_impact > 0 && (
+                                                    <span className="text-[9px] opacity-75">({homeImpact.total_impact.toFixed(1)})</span>
+                                                )}
+                                            </div>
+                                        )}
+                                    </div>
+                                    <div className="flex items-center gap-3">
+                                        {showScores && (
+                                            <span className="text-lg font-bold text-white">{game.home_score}</span>
+                                        )}
+                                        <span className="text-xs text-zinc-600 font-mono">{factors.home_record}</span>
+                                    </div>
                                 </div>
                             </div>
                         </div>
@@ -181,4 +334,4 @@ const GameCard: React.FC<GameCardProps> = ({ game, onClick }) => {
     );
 };
 
-export default GameCard;
+export default memo(GameCardComponent);

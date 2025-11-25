@@ -9,18 +9,66 @@ export interface Prediction {
     signal_strength: string;
     divergence: number;
     volatility: string;
+    elo_prob?: number;
+    form_prob?: number;
+    stat_ensemble_prob?: number; // Replaces ml_prob
+}
+
+export interface Insight {
+    type: string;
+    priority: number;
+    title: string;
+    description: string;
+    action: string;
+    confidence: "HIGH" | "MEDIUM" | "LOW";
 }
 
 export interface Analytics {
-    volatility_score: string;
+    volatility_score?: string;
     stat_divergence: number;
-    market_pressure: number;
-    model_features: {
+    market_pressure?: number;
+    model_features?: {
         home_advantage: number;
         record_diff: number;
         recent_form: number;
     };
-    reasoning: string[];
+    reasoning?: string[];
+    insights?: Insight[];
+    elo_ratings?: {
+        home: number;
+        away: number;
+        difference: number;
+    };
+    recent_form?: {
+        home: {
+            win_pct: number;
+            avg_point_diff: number;
+            momentum: number;
+            strength: string;
+            games_analyzed: number;
+        };
+        away: {
+            win_pct: number;
+            avg_point_diff: number;
+            momentum: number;
+            strength: string;
+            games_analyzed: number;
+        };
+    };
+    head_to_head?: {
+        home_wins: number;
+        away_wins: number;
+        home_win_pct: number;
+        avg_point_diff: number;
+        games_played: number;
+    };
+    model_weights?: {
+        stats: number;
+        kalshi: number;
+        elo: number;
+        form: number;
+        stat_ensemble: number; // Replaces ml
+    };
 }
 
 export interface MarketData {
@@ -46,29 +94,296 @@ export interface Game {
     away_abbr: string;
     game_date: string;
     status: string;
+    home_score?: number;
+    away_score?: number;
     prediction: Prediction;
     analytics?: Analytics;
     market_data: MarketData;
     factors: GameFactors;
+    market_context?: MarketContext;
+    last_updated?: number; // Timestamp from backend
+}
+
+export interface WeatherData {
+    location: string;
+    temperature: number;
+    condition: string;
+    wind_speed: string;
+    precipitation_chance: number;
+    updated_at: string;
+    correlation_impact?: {
+        score: number;
+        severity: "HIGH" | "MEDIUM" | "LOW";
+        factors: string[];
+        note: string;
+    };
+}
+
+export interface Injury {
+    player_name: string;
+    position: string;
+    status: string;
+    injury_type: string;
+    updated_at: string;
+    body_part?: string;
+    details?: string;
+}
+
+export interface InjuryImpact {
+    total_impact: number;
+    key_players_out: Array<{
+        name: string;
+        position: string;
+        injury_type?: string;
+    }>;
+    position_breakdown: Record<string, {
+        count: number;
+        impact: number;
+        players: Array<{
+            name: string;
+            status: string;
+            injury_type: string;
+        }>;
+    }>;
+    severity: 'CRITICAL' | 'HIGH' | 'MODERATE' | 'LOW' | 'NONE';
+    summary: string;
+    total_count: number;
+}
+
+export interface MarketContext {
+    weather?: WeatherData;
+    injuries: {
+        home: Injury[];
+        away: Injury[];
+    };
+    injury_impact?: {
+        home: InjuryImpact;
+        away: InjuryImpact;
+    };
+    news: Array<{
+        headline: string;
+        source: string;
+        sentiment: string;
+        url: string;
+    }>;
+    betting_intelligence?: Array<{
+        type: string;
+        description: string;
+        impact: "HIGH" | "MEDIUM" | "LOW";
+    }>;
+    social_sentiment?: {
+        home_sentiment: number;
+        away_sentiment: number;
+        trending_topics: string[];
+        summary: string;
+    };
+    expert_predictions?: Array<{
+        expert: string;
+        outlet: string;
+        prediction: string;
+        confidence: "HIGH" | "MEDIUM" | "LOW";
+    }>;
+    recent_stats?: {
+        home_trend: string;
+        away_trend: string;
+        key_stat_diff: string;
+    };
+    injury_analysis?: {
+        home_impact: {
+            summary: string;
+            severity: "CRITICAL" | "HIGH" | "MODERATE" | "LOW";
+            key_missing: string[];
+        };
+        away_impact: {
+            summary: string;
+            severity: "CRITICAL" | "HIGH" | "MODERATE" | "LOW";
+            key_missing: string[];
+        };
+        matchup_implication: string;
+    };
 }
 
 export type League = 'nba' | 'nfl';
 
-const API_BASE = 'http://localhost:8000/api';
+const BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000';
+const API_BASE = `${BASE_URL}/api`;
+
+// Request cache and deduplication
+interface CachedRequest<T> {
+    data: T;
+    timestamp: number;
+    promise?: Promise<T>;
+}
+
+const requestCache = new Map<string, CachedRequest<any>>();
+const CACHE_TTL = 2 * 60 * 1000; // 2 minutes cache
+const MAX_CACHE_SIZE = 50; // Maximum number of cached requests
+const pendingRequests = new Map<string, Promise<any>>();
+
+// Cleanup old cache entries periodically
+const cleanupCache = () => {
+    const now = Date.now();
+    const entriesToDelete: string[] = [];
+    
+    for (const [key, cached] of requestCache.entries()) {
+        if (now - cached.timestamp > CACHE_TTL) {
+            entriesToDelete.push(key);
+        }
+    }
+    
+    entriesToDelete.forEach(key => requestCache.delete(key));
+    
+    // If cache is still too large, remove oldest entries
+    if (requestCache.size > MAX_CACHE_SIZE) {
+        const sortedEntries = Array.from(requestCache.entries())
+            .sort((a, b) => a[1].timestamp - b[1].timestamp);
+        const toRemove = sortedEntries.slice(0, requestCache.size - MAX_CACHE_SIZE);
+        toRemove.forEach(([key]) => requestCache.delete(key));
+    }
+};
+
+// Run cleanup every 5 minutes
+if (typeof window !== 'undefined') {
+    setInterval(cleanupCache, 5 * 60 * 1000);
+}
+
+// Helper to get cache key
+const getCacheKey = (endpoint: string, params?: Record<string, any>): string => {
+    const paramStr = params ? JSON.stringify(params) : '';
+    return `${endpoint}:${paramStr}`;
+};
+
+// Helper to check if cache is valid
+const isCacheValid = (cached: CachedRequest<any>): boolean => {
+    return Date.now() - cached.timestamp < CACHE_TTL;
+};
 
 export const api = {
-    getGames: async (sortBy: string = 'time', league: League = 'nba'): Promise<Game[]> => {
-        const response = await fetch(`${API_BASE}/games?sort_by=${sortBy}&league=${league}`);
-        if (!response.ok) {
-            throw new Error('Failed to fetch games');
+    getGames: async (sortBy: string = 'time', league: League = 'nba', options?: { signal?: AbortSignal }): Promise<Game[]> => {
+        const cacheKey = getCacheKey('/games', { sortBy, league });
+        
+        // Check cache first
+        const cached = requestCache.get(cacheKey);
+        if (cached && isCacheValid(cached)) {
+            return cached.data;
         }
-        return response.json();
+        
+        // Check if request is already in progress (deduplication)
+        if (pendingRequests.has(cacheKey)) {
+            return pendingRequests.get(cacheKey)!;
+        }
+        
+        // Create new request
+        const requestPromise = fetch(`${API_BASE}/games?sort_by=${sortBy}&league=${league}`, {
+            signal: options?.signal,
+        })
+            .then(async (response) => {
+                if (!response.ok) {
+                    throw new Error('Failed to fetch games');
+                }
+                const data = await response.json();
+                
+                // Cache the result
+                requestCache.set(cacheKey, {
+                    data,
+                    timestamp: Date.now(),
+                });
+                
+                // Clean up pending request
+                pendingRequests.delete(cacheKey);
+                
+                return data;
+            })
+            .catch((error) => {
+                // Clean up pending request on error
+                pendingRequests.delete(cacheKey);
+                throw error;
+            });
+        
+        // Store pending request
+        pendingRequests.set(cacheKey, requestPromise);
+        
+        return requestPromise;
     },
     
-    getGameDetails: async (gameId: string): Promise<Game> => {
-        const response = await fetch(`${API_BASE}/games/${gameId}`);
+    getGameDetails: async (gameId: string, options?: { signal?: AbortSignal; league?: League }): Promise<Game> => {
+        const cacheKey = getCacheKey(`/games/${gameId}`, { league: options?.league });
+        
+        // Check cache first (for prefetched data)
+        const cached = requestCache.get(cacheKey);
+        if (cached && isCacheValid(cached)) {
+            return cached.data;
+        }
+        
+        // Check if request is already in progress (deduplication)
+        if (pendingRequests.has(cacheKey)) {
+            return pendingRequests.get(cacheKey)!;
+        }
+        
+        const controller = new AbortController();
+        if (options?.signal) {
+            // If the parent signal aborts, abort our controller too
+            options.signal.addEventListener('abort', () => controller.abort());
+        }
+        
+        const timeoutId = setTimeout(() => controller.abort(), 12000); // 12 second timeout
+        
+        // Create request promise
+        const requestPromise = (async () => {
+            try {
+                const url = new URL(`${API_BASE}/games/${gameId}`);
+                if (options?.league) {
+                    url.searchParams.set('league', options.league);
+                }
+                
+                const response = await fetch(url.toString(), {
+                    signal: controller.signal,
+                });
+                clearTimeout(timeoutId);
+                if (!response.ok) {
+                    throw new Error('Failed to fetch game details');
+                }
+                const data = await response.json();
+                
+                // Cache the result
+                requestCache.set(cacheKey, {
+                    data,
+                    timestamp: Date.now(),
+                });
+                
+                // Clean up pending request
+                pendingRequests.delete(cacheKey);
+                
+                return data;
+            } catch (err: any) {
+                clearTimeout(timeoutId);
+                // Clean up pending request on error
+                pendingRequests.delete(cacheKey);
+                if (err.name === 'AbortError') {
+                    throw new Error('Request timed out');
+                }
+                throw err;
+            }
+        })();
+        
+        // Store pending request
+        pendingRequests.set(cacheKey, requestPromise);
+        
+        return requestPromise;
+    },
+
+    getMarketContext: async (homeTeam: string, awayTeam: string, gameDate: string, league: string, options?: { signal?: AbortSignal }): Promise<MarketContext> => {
+        const params = new URLSearchParams({
+            home_team: homeTeam,
+            away_team: awayTeam,
+            game_date: gameDate,
+            league: league
+        });
+        const response = await fetch(`${API_BASE}/market-context?${params.toString()}`, {
+            signal: options?.signal,
+        });
         if (!response.ok) {
-            throw new Error('Failed to fetch game details');
+            throw new Error('Failed to fetch market context');
         }
         return response.json();
     }

@@ -1,6 +1,13 @@
+"""
+Legacy Prediction Engine.
+DEPRECATED: Use EnhancedPredictionEngine (enhanced_prediction.py) for new development.
+Maintained for backward compatibility.
+"""
 from typing import Dict, List, Optional
 import pandas as pd
 from datetime import datetime
+from app.services.signals import SignalEngine
+from app.services.data_feeds import DataFeeds
 
 class PredictionEngine:
     def __init__(self):
@@ -11,6 +18,9 @@ class PredictionEngine:
         
         # Home court advantage (approx 3-4 points or 5-10% win prob boost)
         self.HOME_ADVANTAGE_ELO = 100
+        
+        self.signal_engine = SignalEngine()
+        self.data_feeds = DataFeeds()
         
     def calculate_elo_win_prob(self, home_elo: float, away_elo: float) -> float:
         """
@@ -211,6 +221,21 @@ class PredictionEngine:
         # Market pressure (0-100 scale)
         market_pressure = min(100, int((volume / 1000) * 20 + (15 - min(15, spread)) * 3))
         
+        # Generate context and signals
+        context = self.data_feeds.get_market_context(
+            game.get('home_team_abbrev'),
+            game.get('away_team_abbrev'),
+            game.get('game_date'),
+            game.get('league', 'nba')
+        )
+        
+        market_data_for_signals = {
+            'volume_24h': volume,
+            'last_price': kalshi_price
+        }
+        
+        signals = self.signal_engine.generate_signals(game, market_data_for_signals, context)
+        
         # Reasoning generation
         reasoning = []
         if divergence > 0.15:
@@ -228,13 +253,18 @@ class PredictionEngine:
 
         if kalshi_trend == "UP":
             reasoning.append("Market sentiment is trending towards the Home team.")
-        
+
+        # Append signals to reasoning
+        for sig in signals:
+            reasoning.append(f"{sig['type']}: {sig['description']}")
+
         analytics = {
             "volatility_score": self.calculate_volatility({}, {}), # Reuse for now
             "stat_divergence": round(divergence, 2),
             "market_pressure": market_pressure,
             "model_features": model_features,
-            "reasoning": reasoning
+            "reasoning": reasoning,
+            "signals": signals
         }
 
         return {
