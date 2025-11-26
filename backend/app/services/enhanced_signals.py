@@ -49,7 +49,7 @@ class EnhancedSignalEngine:
         })
     
     def generate_signals(self, game: Dict, market_data: Dict, context: Dict, 
-                        kalshi_markets: Optional[Dict] = None) -> List[Dict]:
+                        kalshi_markets: Optional[Dict] = None, model_prob: Optional[float] = None) -> List[Dict]:
         """
         Generate comprehensive trading signals.
         """
@@ -100,8 +100,8 @@ class EnhancedSignalEngine:
         if line_signal:
             signals.append(line_signal)
         
-        # 8. Contrarian signals
-        contrarian_signal = self._detect_contrarian_opportunity(market_data, context)
+        # 8. Contrarian signals (now uses model probability for verification)
+        contrarian_signal = self._detect_contrarian_opportunity(market_data, context, model_prob)
         if contrarian_signal:
             signals.append(contrarian_signal)
         
@@ -469,7 +469,7 @@ class EnhancedSignalEngine:
         
         return None
     
-    def _detect_contrarian_opportunity(self, market_data: Dict, context: Dict) -> Optional[Dict]:
+    def _detect_contrarian_opportunity(self, market_data: Dict, context: Dict, model_prob: Optional[float] = None) -> Optional[Dict]:
         """Detect contrarian opportunities (when market overreacts)"""
         # High volume + extreme price + low confidence = potential overreaction
         volume = market_data.get('volume_24h', 0)
@@ -478,19 +478,38 @@ class EnhancedSignalEngine:
         # Extreme prices (very high or very low) with high volume might indicate overreaction
         if volume > 1000:
             if price > 0.75:
-                return {
-                    "type": "CONTRARIAN",
-                    "strength": "MEDIUM",
-                    "direction": "BEARISH",
-                    "description": "Extreme bullish pricing with high volume - potential overreaction"
-                }
+                # Market is very bullish. Only fade if model disagrees (is lower).
+                if model_prob is not None and model_prob < 0.65:
+                    return {
+                        "type": "CONTRARIAN",
+                        "strength": "MEDIUM",
+                        "direction": "BEARISH",
+                        "description": f"Market is extremely bullish ({price:.0%}) but model disagrees ({model_prob:.0%}) - potential overreaction"
+                    }
+                elif model_prob is None:
+                    # Fallback if no model prob (be cautious)
+                    return {
+                        "type": "CONTRARIAN",
+                        "strength": "LOW",
+                        "direction": "BEARISH",
+                        "description": "Extreme bullish pricing with high volume - potential overreaction"
+                    }
             elif price < 0.25:
-                return {
-                    "type": "CONTRARIAN",
-                    "strength": "MEDIUM",
-                    "direction": "BULLISH",
-                    "description": "Extreme bearish pricing with high volume - potential overreaction"
-                }
+                # Market is very bearish. Only fade if model disagrees (is higher).
+                if model_prob is not None and model_prob > 0.35:
+                    return {
+                        "type": "CONTRARIAN",
+                        "strength": "MEDIUM",
+                        "direction": "BULLISH",
+                        "description": f"Market is extremely bearish ({price:.0%}) but model disagrees ({model_prob:.0%}) - potential overreaction"
+                    }
+                elif model_prob is None:
+                    return {
+                        "type": "CONTRARIAN",
+                        "strength": "LOW",
+                        "direction": "BULLISH",
+                        "description": "Extreme bearish pricing with high volume - potential overreaction"
+                    }
         
         return None
 

@@ -6,6 +6,9 @@ export interface Prediction {
     away_kalshi_prob: number;
     confidence_score: "HIGH" | "MEDIUM" | "LOW";
     recommendation: string;
+    predicted_winner?: string;
+    suggested_wager?: string;
+    value_proposition?: string;
     signal_strength: string;
     divergence: number;
     volatility: string;
@@ -76,6 +79,12 @@ export interface MarketData {
     yes_bid: number;
     yes_ask: number;
     volume: number;
+    spread?: number;
+    spread_pct?: number;
+    mid_price?: number;
+    open_interest?: number;
+    liquidity?: number;
+    confidence?: "HIGH" | "MEDIUM" | "LOW";
 }
 
 export interface GameFactors {
@@ -191,13 +200,21 @@ export interface MarketContext {
     injury_analysis?: {
         home_impact: {
             summary: string;
-            severity: "CRITICAL" | "HIGH" | "MODERATE" | "LOW";
-            key_missing: string[];
+            severity: "CRITICAL" | "HIGH" | "MODERATE" | "LOW" | "NONE";
+            key_players_out: Array<{
+                name: string;
+                position: string;
+                injury_type?: string;
+            }>;
         };
         away_impact: {
             summary: string;
-            severity: "CRITICAL" | "HIGH" | "MODERATE" | "LOW";
-            key_missing: string[];
+            severity: "CRITICAL" | "HIGH" | "MODERATE" | "LOW" | "NONE";
+            key_players_out: Array<{
+                name: string;
+                position: string;
+                injury_type?: string;
+            }>;
         };
         matchup_implication: string;
     };
@@ -224,15 +241,15 @@ const pendingRequests = new Map<string, Promise<any>>();
 const cleanupCache = () => {
     const now = Date.now();
     const entriesToDelete: string[] = [];
-    
+
     for (const [key, cached] of requestCache.entries()) {
         if (now - cached.timestamp > CACHE_TTL) {
             entriesToDelete.push(key);
         }
     }
-    
+
     entriesToDelete.forEach(key => requestCache.delete(key));
-    
+
     // If cache is still too large, remove oldest entries
     if (requestCache.size > MAX_CACHE_SIZE) {
         const sortedEntries = Array.from(requestCache.entries())
@@ -261,18 +278,18 @@ const isCacheValid = (cached: CachedRequest<any>): boolean => {
 export const api = {
     getGames: async (sortBy: string = 'time', league: League = 'nba', options?: { signal?: AbortSignal }): Promise<Game[]> => {
         const cacheKey = getCacheKey('/games', { sortBy, league });
-        
+
         // Check cache first
         const cached = requestCache.get(cacheKey);
         if (cached && isCacheValid(cached)) {
             return cached.data;
         }
-        
+
         // Check if request is already in progress (deduplication)
         if (pendingRequests.has(cacheKey)) {
             return pendingRequests.get(cacheKey)!;
         }
-        
+
         // Create new request
         const requestPromise = fetch(`${API_BASE}/games?sort_by=${sortBy}&league=${league}`, {
             signal: options?.signal,
@@ -282,16 +299,16 @@ export const api = {
                     throw new Error('Failed to fetch games');
                 }
                 const data = await response.json();
-                
+
                 // Cache the result
                 requestCache.set(cacheKey, {
                     data,
                     timestamp: Date.now(),
                 });
-                
+
                 // Clean up pending request
                 pendingRequests.delete(cacheKey);
-                
+
                 return data;
             })
             .catch((error) => {
@@ -299,35 +316,35 @@ export const api = {
                 pendingRequests.delete(cacheKey);
                 throw error;
             });
-        
+
         // Store pending request
         pendingRequests.set(cacheKey, requestPromise);
-        
+
         return requestPromise;
     },
-    
+
     getGameDetails: async (gameId: string, options?: { signal?: AbortSignal; league?: League }): Promise<Game> => {
         const cacheKey = getCacheKey(`/games/${gameId}`, { league: options?.league });
-        
+
         // Check cache first (for prefetched data)
         const cached = requestCache.get(cacheKey);
         if (cached && isCacheValid(cached)) {
             return cached.data;
         }
-        
+
         // Check if request is already in progress (deduplication)
         if (pendingRequests.has(cacheKey)) {
             return pendingRequests.get(cacheKey)!;
         }
-        
+
         const controller = new AbortController();
         if (options?.signal) {
             // If the parent signal aborts, abort our controller too
             options.signal.addEventListener('abort', () => controller.abort());
         }
-        
+
         const timeoutId = setTimeout(() => controller.abort(), 12000); // 12 second timeout
-        
+
         // Create request promise
         const requestPromise = (async () => {
             try {
@@ -335,7 +352,7 @@ export const api = {
                 if (options?.league) {
                     url.searchParams.set('league', options.league);
                 }
-                
+
                 const response = await fetch(url.toString(), {
                     signal: controller.signal,
                 });
@@ -344,16 +361,16 @@ export const api = {
                     throw new Error('Failed to fetch game details');
                 }
                 const data = await response.json();
-                
+
                 // Cache the result
                 requestCache.set(cacheKey, {
                     data,
                     timestamp: Date.now(),
                 });
-                
+
                 // Clean up pending request
                 pendingRequests.delete(cacheKey);
-                
+
                 return data;
             } catch (err: any) {
                 clearTimeout(timeoutId);
@@ -365,10 +382,10 @@ export const api = {
                 throw err;
             }
         })();
-        
+
         // Store pending request
         pendingRequests.set(cacheKey, requestPromise);
-        
+
         return requestPromise;
     },
 
@@ -386,5 +403,70 @@ export const api = {
             throw new Error('Failed to fetch market context');
         }
         return response.json();
+    },
+
+    // Accuracy tracking endpoints
+    getAccuracyMetrics: async (daysBack: number = 30, options?: { signal?: AbortSignal }): Promise<AccuracyMetrics> => {
+        const response = await fetch(`${API_BASE}/accuracy/metrics?days_back=${daysBack}`, {
+            signal: options?.signal,
+        });
+        if (!response.ok) {
+            throw new Error('Failed to fetch accuracy metrics');
+        }
+        return response.json();
+    },
+
+    recordGameOutcome: async (gameId: string, homeWon: boolean, homeScore: number, awayScore: number): Promise<void> => {
+        const response = await fetch(`${API_BASE}/accuracy/outcome`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+                game_id: gameId,
+                home_won: homeWon,
+                home_score: homeScore,
+                away_score: awayScore,
+            }),
+        });
+        if (!response.ok) {
+            throw new Error('Failed to record game outcome');
+        }
+    },
+
+    getGameAccuracy: async (gameId: string, options?: { signal?: AbortSignal }): Promise<GameAccuracy> => {
+        const response = await fetch(`${API_BASE}/accuracy/game/${gameId}`, {
+            signal: options?.signal,
+        });
+        if (!response.ok) {
+            throw new Error('Failed to fetch game accuracy');
+        }
+        return response.json();
     }
 };
+
+// Accuracy tracking types
+export interface AccuracyMetrics {
+    total_predictions: number;
+    accuracy: number;
+    brier_score: number;
+    log_loss: number;
+    calibration: Record<number, {
+        predicted_prob: number;
+        actual_rate: number;
+        count: number;
+    }>;
+    by_model?: Record<string, {
+        accuracy: number;
+        brier_score: number;
+        count: number;
+    }>;
+}
+
+export interface GameAccuracy {
+    status: 'pending' | 'verified';
+    prediction?: any;
+    error?: number;
+    correct?: boolean;
+    brier_score?: number;
+}

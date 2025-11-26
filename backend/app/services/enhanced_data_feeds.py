@@ -10,8 +10,28 @@ import logging
 import random
 import json
 from dotenv import load_dotenv
-import google.generativeai as genai
+import feedparser
+from textblob import TextBlob
+import time
 from app.config import get_settings
+
+class SimpleCache:
+    def __init__(self, ttl_seconds: int = 3600): # Default 1 hour cache
+        self.cache = {}
+        self.ttl = ttl_seconds
+    
+    def get(self, key):
+        if key in self.cache:
+            data, timestamp = self.cache[key]
+            if time.time() - timestamp < self.ttl:
+                return data
+            else:
+                del self.cache[key]
+        return None
+    
+    def set(self, key, value):
+        self.cache[key] = (value, time.time())
+
 
 load_dotenv()
 
@@ -40,24 +60,13 @@ class EnhancedDataFeeds:
         self.headers = {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
         }
-        self._init_gemini_client()
-
+        # Cache for market context (injuries, weather, gemini analysis)
+        # This prevents repeated expensive API calls for the same game
+        self.context_cache = SimpleCache(ttl_seconds=3600)
+        
     def _init_gemini_client(self):
-        """Initialize Google Gemini API client"""
-        try:
-            api_key = self.settings.GEMINI_API_KEY
-            if api_key:
-                genai.configure(api_key=api_key)
-                # Use gemini-2.5-flash (fast, available on free tier)
-                # Alternative: gemini-2.5-pro for advanced reasoning, gemini-3-pro-preview (may require paid tier)
-                self.gemini_model = genai.GenerativeModel('gemini-2.5-flash')
-                logger.info("Gemini API client initialized successfully with gemini-2.5-flash")
-            else:
-                self.gemini_model = None
-                logger.warning("GEMINI_API_KEY not found. Intelligence features will be limited.")
-        except Exception as e:
-            self.gemini_model = None
-            logger.error(f"Failed to initialize Gemini client: {e}")
+        """Deprecated: Gemini client removed in favor of free APIs"""
+        pass
     
     def _load_alternative_abbr_map(self) -> Dict[str, Dict[str, str]]:
         """Map ESPN's alternative abbreviations to correct team_id_map keys"""
@@ -305,8 +314,22 @@ class EnhancedDataFeeds:
             else:  # nba
                 url = f"{self.espn_base}/basketball/nba/teams/{team_id}/roster"
             
-            response = requests.get(url, headers=self.headers, timeout=10)
-            response.raise_for_status()
+            # Retry logic with increased timeout
+            max_retries = 2
+            for attempt in range(max_retries):
+                try:
+                    response = requests.get(url, headers=self.headers, timeout=20)
+                    response.raise_for_status()
+                    break
+                except requests.Timeout as e:
+                    if attempt == max_retries - 1:
+                        logger.warning(f"ESPN API timeout for {team_abbr} after {max_retries} attempts")
+                        return []
+                    logger.debug(f"Timeout on attempt {attempt + 1}, retrying...")
+                    time.sleep(0.5 * (attempt + 1))  # Exponential backoff
+                except requests.RequestException as e:
+                    logger.warning(f"ESPN API error for {team_abbr}: {e}")
+                    return []
             data = response.json()
             
             # Ensure data is a dictionary
@@ -318,15 +341,24 @@ class EnhancedDataFeeds:
             injuries = []
             athletes = []
             
+            logger.info(f"API Response Keys for {team_abbr}: {list(data.keys())}")
+            if 'athletes' in data:
+                logger.info(f"Raw athletes type: {type(data['athletes'])}")
+                if isinstance(data['athletes'], list):
+                    logger.info(f"Raw athletes count: {len(data['athletes'])}")
+
+            
             # ESPN API might nest data in 'team' or 'sports' keys
             try:
-                if 'team' in data:
+                if 'athletes' in data:
+                    athletes = data['athletes']
+                elif 'team' in data:
                     team_data = data['team']
                     if isinstance(team_data, dict):
                         athletes = team_data.get('athletes', [])
                     elif isinstance(team_data, str):
                         logger.warning(f"Team data is a string, not a dict for {team_abbr}")
-                        return []
+                        athletes = []
                 elif 'sports' in data and isinstance(data['sports'], list) and len(data['sports']) > 0:
                     # Sometimes nested in sports[0].leagues[0].teams[0]
                     sports = data['sports']
@@ -340,15 +372,28 @@ class EnhancedDataFeeds:
                                         if isinstance(teams[0], dict):
                                             athletes = teams[0].get('athletes', [])
                 else:
-                    athletes = data.get('athletes', [])
+                    athletes = []
             except (AttributeError, TypeError, KeyError) as e:
                 logger.warning(f"Error parsing athletes data structure for {team_abbr}: {e}")
-                return []
+                athletes = []
             
             # Ensure athletes is a list
             if not isinstance(athletes, list):
                 logger.warning(f"Expected list for athletes, got {type(athletes)} for {team_abbr}")
                 return []
+
+            # Handle NFL structure where athletes are grouped by position (offense, defense, special teams)
+            # Structure: [{"position": "offense", "items": [...]}, ...]
+            if athletes and isinstance(athletes[0], dict) and 'items' in athletes[0]:
+                logger.info(f"Detected grouped athlete structure for {team_abbr} (likely NFL)")
+                flat_athletes = []
+                for group in athletes:
+                    if isinstance(group, dict):
+                        flat_athletes.extend(group.get('items', []))
+                athletes = flat_athletes
+            
+            logger.info(f"Processing {len(athletes)} athletes for {team_abbr}")
+
             
             for athlete in athletes:
                 try:
@@ -453,7 +498,7 @@ class EnhancedDataFeeds:
             else:
                 url = f"{self.espn_base}/basketball/nba/teams/{team_id}"
             
-            response = requests.get(url, headers=self.headers, timeout=10)
+            response = requests.get(url, headers=self.headers, timeout=20)
             response.raise_for_status()
             data = response.json()
             
@@ -463,7 +508,7 @@ class EnhancedDataFeeds:
             return []
             
         except Exception as e:
-            logger.error(f"Error fetching injury report: {e}")
+            logger.warning(f"Error fetching injury report (non-critical): {e}")
             return []
     
     def calculate_injury_impact(self, injuries: List[Dict], league: str = "nfl") -> Dict:
@@ -692,6 +737,13 @@ class EnhancedDataFeeds:
             game_date = datetime.fromisoformat(game_date_str.replace("Z", ""))
         except ValueError:
             game_date = datetime.now()
+            
+        # Check cache first
+        cache_key = f"{league}_{home_team}_{away_team}_{game_date.strftime('%Y-%m-%d')}"
+        cached_context = self.context_cache.get(cache_key)
+        if cached_context:
+            logger.info(f"Returning cached market context for {cache_key}")
+            return cached_context
         
         home_injuries = self.get_team_injuries(home_team, league)
         away_injuries = self.get_team_injuries(away_team, league)
@@ -703,14 +755,14 @@ class EnhancedDataFeeds:
         # Get weather
         weather = self._fetch_weather(home_team, game_date, league)
         
-        # Get Gemini Intelligence (pass game_date for accurate season/date filtering)
-        intelligence = self._get_intelligence_with_gemini(home_team, away_team, league, game_date)
+        # Get Free Intelligence (News + Sentiment)
+        intelligence = self._get_intelligence_free(home_team, away_team, league, game_date)
         
-        # Enhance injuries with Gemini (pass game_date for context)
+        # Enhance injuries deterministically
         injuries_dict = {"home": home_injuries, "away": away_injuries}
-        enhanced_injury_analysis = self._enhance_injuries_with_gemini(injuries_dict, league, game_date)
+        enhanced_injury_analysis = self._analyze_injuries_deterministic(injuries_dict, league)
 
-        return {
+        result = {
             "weather": weather,
             "injuries": injuries_dict,
             "injury_impact": {
@@ -724,177 +776,131 @@ class EnhancedDataFeeds:
             "recent_stats": intelligence.get("recent_stats", {}),
             "injury_analysis": enhanced_injury_analysis
         }
+        
+        # Cache the result
+        self.context_cache.set(cache_key, result)
+        
+        return result
     
     def _get_related_news(self, home: str, away: str) -> List[Dict]:
         """Deprecated: Use _get_intelligence_with_gemini instead"""
         return []
 
-    def _query_gemini(self, prompt: str) -> Optional[str]:
-        """Query Gemini API with error handling"""
-        if not self.gemini_model:
-            return None
-            
+    def _fetch_news_rss(self, query: str) -> List[Dict]:
+        """Fetch news from Google News RSS (Free)"""
         try:
-            # Add retry logic
-            for attempt in range(3):
-                try:
-                    response = self.gemini_model.generate_content(prompt)
-                    return response.text
-                except Exception as e:
-                    if attempt == 2:  # Last attempt
-                        raise e
-                    import time
-                    time.sleep(1 * (attempt + 1))  # Exponential backoff
-                    
-        except Exception as e:
-            logger.error(f"Gemini API query failed: {e}")
-            return None
-
-    def _parse_gemini_response(self, response_text: str) -> Dict:
-        """Parse Gemini JSON response"""
-        if not response_text:
-            return {}
+            encoded_query = requests.utils.quote(query)
+            url = f"https://news.google.com/rss/search?q={encoded_query}&hl=en-US&gl=US&ceid=US:en"
+            feed = feedparser.parse(url)
             
+            news_items = []
+            for entry in feed.entries[:5]: # Top 5
+                # Calculate sentiment using TextBlob
+                blob = TextBlob(entry.title)
+                polarity = blob.sentiment.polarity
+                
+                if polarity > 0.1:
+                    sentiment = "POSITIVE"
+                elif polarity < -0.1:
+                    sentiment = "NEGATIVE"
+                else:
+                    sentiment = "NEUTRAL"
+
+                news_items.append({
+                    "headline": entry.title,
+                    "source": entry.source.title if hasattr(entry, 'source') else "Google News",
+                    "url": entry.link,
+                    "sentiment": sentiment,
+                    "published": entry.published if hasattr(entry, 'published') else ""
+                })
+            return news_items
+        except Exception as e:
+            logger.error(f"Error fetching RSS news: {e}")
+            return []
+
+    def _fetch_reddit_sentiment(self, query: str) -> Dict:
+        """Fetch sentiment from Reddit (Free JSON API)"""
         try:
-            # Clean up markdown code blocks if present
-            cleaned_text = response_text.replace("```json", "").replace("```", "").strip()
-            return json.loads(cleaned_text)
-        except json.JSONDecodeError:
-            logger.error("Failed to parse Gemini response as JSON")
-            return {}
-        except Exception as e:
-            logger.error(f"Error parsing Gemini response: {e}")
-            return {}
-
-    def _get_intelligence_with_gemini(self, home_team: str, away_team: str, league: str, game_date: datetime) -> Dict:
-        """
-        Gather comprehensive intelligence using Gemini.
-        Returns news, betting info, sentiment, expert picks, and stats.
-        """
-        if not self.gemini_model:
-            return {}
-
-        # Format game date for prompt
-        game_date_str = game_date.strftime("%B %d, %Y")
-        current_date = datetime.now()
-        current_season = current_date.year if current_date.month >= 9 else current_date.year - 1  # NFL/NBA season logic
-        
-        # Determine if game is in current season
-        game_year = game_date.year
-        game_month = game_date.month
-        if league == "nfl":
-            # NFL season: September to February
-            game_season = game_year if game_month >= 9 else game_year - 1
-        else:  # NBA
-            # NBA season: October to June
-            game_season = game_year if game_month >= 10 else game_year - 1
-        
-        is_current_season = game_season == current_season
-        season_context = f"the {game_season}-{game_season+1} season" if is_current_season else f"the {game_season}-{game_season+1} season (historical game)"
-
-        prompt = f"""
-        You are a professional sports analyst. Analyze the {league.upper()} game scheduled for {game_date_str} between {away_team} (Away) and {home_team} (Home).
-        
-        IMPORTANT: This game is from {season_context}. Focus ONLY on information relevant to this specific game date and season:
-        - News should be from around {game_date_str} or leading up to it
-        - Recent stats should reflect performance from {season_context}
-        - Expert predictions should be for this specific matchup on {game_date_str}
-        - Social sentiment should reflect discussions about this specific game
-        
-        Provide a comprehensive intelligence report in valid JSON format with the following structure:
-        {{
-            "news": [
-                {{
-                    "headline": "string (relevant to {game_date_str})",
-                    "source": "string",
-                    "sentiment": "POSITIVE|NEGATIVE|NEUTRAL",
-                    "url": "string (optional)"
-                }}
-            ],
-            "betting_intelligence": [
-                {{
-                    "type": "LINE_MOVEMENT|sharp_money|public_money",
-                    "description": "string (for game on {game_date_str})",
-                    "impact": "HIGH|MEDIUM|LOW"
-                }}
-            ],
-            "social_sentiment": {{
-                "home_sentiment": 0.0 to 1.0,
-                "away_sentiment": 0.0 to 1.0,
-                "trending_topics": ["string (relevant to {game_date_str})"],
-                "summary": "string (sentiment about this specific game)"
-            }},
-            "expert_predictions": [
-                {{
-                    "expert": "string",
-                    "outlet": "string",
-                    "prediction": "string (for {game_date_str} game)",
-                    "confidence": "HIGH|MEDIUM|LOW"
-                }}
-            ],
-            "recent_stats": {{
-                "home_trend": "string (performance in {season_context} leading up to {game_date_str})",
-                "away_trend": "string (performance in {season_context} leading up to {game_date_str})",
-                "key_stat_diff": "string (comparison relevant to {game_date_str})"
-            }}
-        }}
-
-        Focus on information specific to {game_date_str} and {season_context}. 
-        If this is a historical game, provide context-appropriate historical data.
-        If this is a future game, focus on current season trends and recent news.
-        Keep the JSON valid and strictly follow the structure.
-        """
-        
-        response = self._query_gemini(prompt)
-        return self._parse_gemini_response(response)
-
-    def _enhance_injuries_with_gemini(self, injuries: Dict, league: str, game_date: datetime) -> Dict:
-        """
-        Enhance injury reports with Gemini analysis.
-        """
-        if not self.gemini_model or not injuries:
-            return {}
+            headers = {'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.114 Safari/537.36'}
+            url = f"https://www.reddit.com/search.json?q={query}&sort=relevance&t=week&limit=10"
+            response = requests.get(url, headers=headers, timeout=5)
             
-        # Simplify injury data for prompt
-        home_injuries = [f"{i['player_name']} ({i['position']}): {i['status']} - {i['injury_type']}" for i in injuries.get('home', [])]
-        away_injuries = [f"{i['player_name']} ({i['position']}): {i['status']} - {i['injury_type']}" for i in injuries.get('away', [])]
-        
-        if not home_injuries and not away_injuries:
+            if response.status_code != 200:
+                return {}
+                
+            data = response.json()
+            posts = []
+            
+            # Extract posts safely
+            if 'data' in data and 'children' in data['data']:
+                for child in data['data']['children']:
+                    post = child.get('data', {})
+                    posts.append(post.get('title', '') + " " + post.get('selftext', ''))
+            
+            if not posts:
+                return {}
+                
+            # Analyze sentiment
+            polarities = []
+            for text in posts:
+                blob = TextBlob(text)
+                polarities.append(blob.sentiment.polarity)
+            
+            avg_sentiment = sum(polarities) / len(polarities) if polarities else 0
+            
+            # Normalize to 0-1 scale (approx)
+            normalized_sentiment = (avg_sentiment + 1) / 2
+            
+            summary = "Neutral sentiment"
+            if avg_sentiment > 0.1: summary = "Positive sentiment"
+            elif avg_sentiment < -0.1: summary = "Negative sentiment"
+            
+            return {
+                "home_sentiment": 0.5, # Hard to split by team without complex logic
+                "away_sentiment": 0.5,
+                "overall_sentiment": normalized_sentiment,
+                "summary": f"{summary} on Reddit based on recent posts."
+            }
+            
+        except Exception as e:
+            logger.error(f"Error fetching Reddit sentiment: {e}")
             return {}
 
-        game_date_str = game_date.strftime("%B %d, %Y")
-        
-        prompt = f"""
-        Analyze the following injury report for an {league.upper()} game scheduled for {game_date_str}:
-        
-        Home Team Injuries:
-        {json.dumps(home_injuries)}
-        
-        Away Team Injuries:
-        {json.dumps(away_injuries)}
-        
-        IMPORTANT: These injuries are for the game on {game_date_str}. Analyze their impact specifically for this game date.
-        Consider:
-        - Whether injuries are current/relevant for {game_date_str}
-        - Recovery timelines relative to {game_date_str}
-        - Impact on team performance for this specific matchup
-        
-        Provide an impact analysis in valid JSON format:
-        {{
-            "home_impact": {{
-                "summary": "string (impact analysis for {game_date_str} game)",
-                "severity": "CRITICAL|HIGH|MODERATE|LOW",
-                "key_missing": ["string (key players missing for {game_date_str})"]
-            }},
-            "away_impact": {{
-                "summary": "string (impact analysis for {game_date_str} game)",
-                "severity": "CRITICAL|HIGH|MODERATE|LOW",
-                "key_missing": ["string (key players missing for {game_date_str})"]
-            }},
-            "matchup_implication": "string (how these injuries affect the specific matchup dynamics for {game_date_str})"
-        }}
+    def _get_intelligence_free(self, home_team: str, away_team: str, league: str, game_date: datetime) -> Dict:
         """
+        Gather intelligence using free sources (RSS, Reddit).
+        """
+        # 1. News
+        query = f"{away_team} vs {home_team} {league}"
+        news = self._fetch_news_rss(query)
         
-        response = self._query_gemini(prompt)
-        return self._parse_gemini_response(response)
+        # 2. Sentiment
+        sentiment = self._fetch_reddit_sentiment(query)
+        
+        return {
+            "news": news,
+            "betting_intelligence": [], # Not available free reliably
+            "social_sentiment": sentiment,
+            "expert_predictions": [], # Not available free reliably
+            "recent_stats": {} # Already covered by stats engine
+        }
+
+    def _analyze_injuries_deterministic(self, injuries: Dict, league: str) -> Dict:
+        """
+        Analyze injuries deterministically without LLM.
+        """
+        home_impact = self.calculate_injury_impact(injuries.get('home', []), league)
+        away_impact = self.calculate_injury_impact(injuries.get('away', []), league)
+        
+        matchup_implication = "Neutral"
+        if home_impact['total_impact'] > away_impact['total_impact'] + 2:
+            matchup_implication = "Significant disadvantage for Home team due to injuries."
+        elif away_impact['total_impact'] > home_impact['total_impact'] + 2:
+            matchup_implication = "Significant disadvantage for Away team due to injuries."
+            
+        return {
+            "home_impact": home_impact,
+            "away_impact": away_impact,
+            "matchup_implication": matchup_implication
+        }
 
