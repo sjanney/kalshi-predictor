@@ -1,10 +1,11 @@
 import React, { useEffect, useState, useRef, useCallback, lazy, Suspense } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { type Game, type League } from '../lib/api';
+import { type Game, type League, api } from '../lib/api';
 import { useFilterStore } from '../lib/store';
 import { useGameContext } from '../contexts/GameContext';
 import GameCard from './GameCard';
 import InsightsPanel from './charts/InsightsPanel';
+import AccuracyPanel from './AccuracyPanel';
 import { RefreshCw, Zap, Filter, Settings, BarChart3, AlertTriangle, Bell, X, TrendingUp, CheckCircle, HelpCircle } from 'lucide-react';
 import { cn } from './ui/shared';
 import { GameCardSkeleton, InsightsPanelSkeleton, GameAnalyticsModalSkeleton } from './ui/skeletons';
@@ -35,10 +36,8 @@ const Dashboard: React.FC = () => {
         selectedGame,
         selectedGameDetails,
         selectedGameLoading,
-        selectedGameError,
         setSelectedGame,
         clearSelectedGame,
-        refreshSelectedGame,
         autoRefreshEnabled,
         setAutoRefreshEnabled,
         refreshIntervalMinutes,
@@ -147,7 +146,7 @@ const Dashboard: React.FC = () => {
             ? games.reduce((sum, g) => sum + Math.abs(g.prediction.divergence), 0) / games.length
             : 0;
         const totalVolume = games.reduce((sum, g) => sum + (g.market_data.volume || 0), 0);
-        
+
         return {
             total,
             highConf,
@@ -165,11 +164,47 @@ const Dashboard: React.FC = () => {
         clearSelectedGame();
     }, [clearSelectedGame]);
 
-    const handleRetrySelectedGame = useCallback(() => {
-        if (selectedGame) {
-            refreshSelectedGame();
+
+
+    // Auto-record outcomes for final games
+    useEffect(() => {
+        const recordedGamesKey = 'kalshi-recorded-outcomes';
+        const getRecordedGames = (): Set<string> => {
+            try {
+                const stored = localStorage.getItem(recordedGamesKey);
+                return stored ? new Set(JSON.parse(stored)) : new Set();
+            } catch {
+                return new Set();
+            }
+        };
+
+        const recordedGames = getRecordedGames();
+        const finalGames = games.filter(g =>
+            g.status?.toLowerCase().includes('final') &&
+            g.home_score !== undefined &&
+            g.away_score !== undefined &&
+            !recordedGames.has(g.game_id)
+        );
+
+        if (finalGames.length > 0) {
+            finalGames.forEach(async (game) => {
+                try {
+                    const homeWon = Number(game.home_score) > Number(game.away_score);
+                    await api.recordGameOutcome(
+                        game.game_id,
+                        homeWon,
+                        Number(game.home_score),
+                        Number(game.away_score)
+                    );
+                    recordedGames.add(game.game_id);
+                    localStorage.setItem(recordedGamesKey, JSON.stringify(Array.from(recordedGames)));
+                    console.log(`Recorded outcome for game ${game.game_id}`);
+                } catch (err) {
+                    console.error(`Failed to record outcome for game ${game.game_id}:`, err);
+                }
+            });
         }
-    }, [selectedGame, refreshSelectedGame]);
+    }, [games]);
 
     return (
         <div className="min-h-screen bg-background text-white font-sans selection:bg-primary/30">
@@ -188,7 +223,7 @@ const Dashboard: React.FC = () => {
                             <span className="text-[10px] text-primary font-medium tracking-wider uppercase">Pro v3.0</span>
                         </div>
                     </div>
-                    
+
                     <div className="flex items-center gap-4">
                         <div className="hidden md:flex items-center gap-8 mr-6 border-r border-zinc-800 pr-8">
                             <div className="text-center group">
@@ -205,7 +240,7 @@ const Dashboard: React.FC = () => {
                             </div>
                         </div>
 
-                        <button 
+                        <button
                             onClick={() => setShowHelpGuide(true)}
                             className="p-2 rounded-lg hover:bg-surface_highlight transition-all text-zinc-400 hover:text-white"
                             title="Help & Guide"
@@ -213,7 +248,7 @@ const Dashboard: React.FC = () => {
                             <HelpCircle size={18} />
                         </button>
 
-                        <button 
+                        <button
                             onClick={() => setShowToolbox(!showToolbox)}
                             className={cn("p-2 rounded-lg hover:bg-surface_highlight transition-all", showToolbox ? "text-primary bg-primary/10" : "text-zinc-400 hover:text-white")}
                             title="Trading Toolbox"
@@ -221,8 +256,8 @@ const Dashboard: React.FC = () => {
                             <Settings size={18} />
                         </button>
 
-                        <button 
-                            onClick={handleRefresh} 
+                        <button
+                            onClick={handleRefresh}
                             className={cn("p-2 rounded-lg hover:bg-surface_highlight transition-all text-zinc-400 hover:text-white", (isRefreshing || isSyncing) && "animate-spin")}
                             title="Refresh"
                             disabled={isRefreshing || isSyncing}
@@ -236,30 +271,30 @@ const Dashboard: React.FC = () => {
             {/* Controls Bar */}
             <div className="border-b border-zinc-800 bg-surface/30 relative z-40">
                 <div className="max-w-7xl mx-auto px-6 py-3 flex flex-wrap gap-4 items-center justify-between">
-                    
+
                     {/* League Tabs */}
                     <div className="flex items-center gap-2 bg-zinc-900/50 p-1 rounded-lg border border-zinc-800">
-                         {(['nba', 'nfl'] as League[]).map((l) => (
+                        {(['nba', 'nfl'] as League[]).map((l) => (
                             <button
                                 key={l}
                                 onClick={() => setFilter('league', l)}
                                 className={cn(
                                     "px-4 py-1.5 rounded-md text-xs font-bold uppercase tracking-wider transition-all",
-                                    league === l 
-                                        ? "bg-emerald-600 text-white shadow-md shadow-emerald-900/20" 
+                                    league === l
+                                        ? "bg-emerald-600 text-white shadow-md shadow-emerald-900/20"
                                         : "text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800/50"
                                 )}
                             >
                                 {l}
                             </button>
-                         ))}
+                        ))}
                     </div>
 
                     <div className="flex items-center gap-6">
                         <div className="flex items-center gap-2 text-sm text-zinc-400">
                             <Filter size={14} />
                             <span className="font-medium text-zinc-500">FILTER:</span>
-                            <select 
+                            <select
                                 value={minConfidence}
                                 onChange={(e) => setFilter('minConfidence', e.target.value)}
                                 className="bg-transparent border-none focus:ring-0 text-zinc-300 font-medium text-sm cursor-pointer"
@@ -269,7 +304,7 @@ const Dashboard: React.FC = () => {
                                 <option value="HIGH">High Only</option>
                             </select>
                         </div>
-                        
+
                         <div className="flex items-center gap-2 text-sm text-zinc-400">
                             <span className="font-medium text-zinc-500">SORT:</span>
                             <div className="flex bg-zinc-900 rounded-lg p-0.5 border border-zinc-800">
@@ -327,11 +362,11 @@ const Dashboard: React.FC = () => {
                         </div>
                     </div>
                 </div>
-                
+
                 {/* Trading Toolbox Drawer */}
                 <AnimatePresence>
                     {showToolbox && (
-                        <motion.div 
+                        <motion.div
                             initial={{ height: 0, opacity: 0 }}
                             animate={{ height: 'auto', opacity: 1 }}
                             exit={{ height: 0, opacity: 0 }}
@@ -441,6 +476,12 @@ const Dashboard: React.FC = () => {
 
             {/* Main Content */}
             <main className="max-w-7xl mx-auto px-6 py-8">
+                {/* Accuracy Panel - Show if we have games */}
+                {!loading && games.length > 0 && (
+                    <div className="mb-8">
+                        <AccuracyPanel />
+                    </div>
+                )}
                 {/* Insights Panel - Show skeleton when loading, content when loaded */}
                 {loading && games.length === 0 ? (
                     <>
@@ -495,7 +536,7 @@ const Dashboard: React.FC = () => {
                         </div>
                         <h3 className="text-xl font-bold text-white mb-2">Connection Error</h3>
                         <p className="text-zinc-500 max-w-md mb-6">{error}</p>
-                        <button 
+                        <button
                             onClick={() => refreshGames()}
                             className="px-4 py-2 bg-zinc-800 hover:bg-zinc-700 text-white rounded-lg font-medium transition-colors"
                         >
@@ -510,8 +551,8 @@ const Dashboard: React.FC = () => {
                     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                         <AnimatePresence>
                             {filteredGames.map((game) => (
-                                <GameCard 
-                                    key={game.game_id} 
+                                <GameCard
+                                    key={game.game_id}
                                     game={game}
                                     onSelect={handleSelectGame}
                                 />
@@ -535,12 +576,10 @@ const Dashboard: React.FC = () => {
                         </div>
                     }>
                         {selectedGameDetails ? (
-                            <GameAnalyticsModal 
+                            <GameAnalyticsModal
                                 key={selectedGame.game_id}
                                 game={selectedGameDetails}
                                 loading={selectedGameLoading}
-                                error={selectedGameError}
-                                onRetry={handleRetrySelectedGame}
                                 onClose={handleCloseSelectedGame}
                             />
                         ) : selectedGameLoading ? (
@@ -574,16 +613,17 @@ export default Dashboard;
 interface MarketHeatmapModalProps {
     open: boolean;
     onClose: () => void;
-    games: Game[];
+    games?: Game[];
 }
 
 const MarketHeatmapModal: React.FC<MarketHeatmapModalProps> = ({ open, onClose, games }) => {
-    const heatmapData = games.map((game) => ({
+    const safeGames = games ?? [];
+    const heatmapData = safeGames.map((game) => ({
         name: `${game.away_abbr} @ ${game.home_abbr}`,
-        volume: game.market_data.volume,
-        divergence: Math.abs(game.prediction.divergence * 100),
-        confidence: game.prediction.confidence_score,
-        price: (game.market_data.price ?? game.prediction.home_kalshi_prob) * 100,
+        volume: game.market_data?.volume ?? 0,
+        divergence: Math.abs((game.prediction?.divergence ?? 0) * 100),
+        confidence: game.prediction?.confidence_score ?? 'LOW',
+        price: ((game.market_data?.price ?? game.prediction?.home_kalshi_prob ?? 0) * 100),
     }));
 
     const confidenceColor = (confidence: Game['prediction']['confidence_score']) => {
@@ -844,16 +884,17 @@ interface EdgeAlertsTrayProps {
 
 const EdgeAlertsTray: React.FC<EdgeAlertsTrayProps> = ({ alerts, visible, onDismiss }) => {
     if (!visible) return null;
+    const safeAlerts = alerts ?? [];
     return (
         <AnimatePresence>
-            {alerts.length > 0 && (
+            {safeAlerts.length > 0 && (
                 <motion.div
                     className="fixed bottom-6 right-6 z-50 w-72 space-y-2"
                     initial={{ opacity: 0, y: 20 }}
                     animate={{ opacity: 1, y: 0 }}
                     exit={{ opacity: 0, y: 20 }}
                 >
-                    {alerts.map((alert) => (
+                    {safeAlerts.map((alert) => (
                         <motion.div
                             key={alert.id}
                             className="bg-emerald-950/80 border border-emerald-600/30 rounded-xl p-3 shadow-lg shadow-emerald-900/30"

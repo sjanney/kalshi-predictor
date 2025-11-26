@@ -1,11 +1,11 @@
 import React, { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
-import { 
-    X, TrendingUp, TrendingDown, Activity, BarChart3, Brain, Target, Zap, 
-    Calendar, DollarSign, Gauge, Cloud, Wind, Thermometer, UserMinus, AlertCircle,
-    Newspaper, MessageSquare, Users
+import {
+    X, TrendingUp, Activity, BarChart3, Brain, Target, Zap,
+    Calendar, DollarSign, Cloud, Wind, Thermometer, UserMinus, AlertCircle,
+    Newspaper, Users, Sparkles
 } from 'lucide-react';
-import { 
+import {
     ResponsiveContainer, BarChart, Bar, PieChart, Pie, Cell,
     XAxis, YAxis, CartesianGrid, Tooltip, Legend, RadarChart, PolarGrid,
     PolarAngleAxis, PolarRadiusAxis, Radar
@@ -14,65 +14,60 @@ import type { Game } from '../lib/api';
 import { useGameContext } from '../contexts/GameContext';
 import { useDataStore } from '../lib/store';
 import { cn } from './ui/shared';
-import { GameAnalyticsModalSkeleton } from './ui/skeletons';
+import MarketAnalysisPanel from './MarketAnalysisPanel';
 
 interface GameAnalyticsModalProps {
     game: Game;
     onClose: () => void;
     loading?: boolean;
-    error?: string | null;
-    onRetry?: () => void;
 }
 
-const GameAnalyticsModal: React.FC<GameAnalyticsModalProps> = ({ game, onClose, loading = false, error, onRetry }) => {
-    const { prediction, analytics, factors, market_data } = game;
-    const [activeTab, setActiveTab] = useState<'overview' | 'insights' | 'context' | 'charts'>('overview');
+const GameAnalyticsModal: React.FC<GameAnalyticsModalProps> = ({ game, onClose, loading = false }) => {
+    const { prediction, analytics, market_data } = game;
+    const [activeTab, setActiveTab] = useState<'overview' | 'insights' | 'context' | 'charts' | 'market'>('overview');
     const { getMarketContext, contextLoading, contextError } = useGameContext();
-    
-    // Use Zustand store selector to make contextData reactive
-    const contextData = useDataStore((state) => {
-        const cached = state.getContext(game.game_id);
-        return cached ? cached.data : null;
-    });
+
+    // Use Zustand store with proper subscription to make contextData reactive
+    const contextData = useDataStore((state) => state.marketContexts[game.game_id]?.data || null);
 
     useEffect(() => {
+        // When context tab is active and we don't have data and we're not already loading
         if (activeTab === 'context' && !contextData && !contextLoading) {
-            // Context will be fetched via getMarketContext which handles caching
+            // Fetch context data
             getMarketContext(game.game_id, game);
         }
-    }, [activeTab, game.game_id, contextData, contextLoading, getMarketContext]);
-    
+    }, [activeTab, game.game_id, contextData, contextLoading, getMarketContext, game]);
+
     const handleRetryContext = () => {
         getMarketContext(game.game_id, game);
     };
 
-    const recommendationColor = 
+    const recommendationColor =
         prediction.recommendation.includes("Follow") ? "text-emerald-400" :
-        prediction.recommendation.includes("Fade") ? "text-amber-400" :
-        "text-zinc-400";
+            prediction.recommendation.includes("Fade") ? "text-amber-400" :
+                "text-zinc-400";
 
     const formattedDate = game.game_date ? new Date(game.game_date).toLocaleString(undefined, { weekday: 'short', hour: 'numeric', minute: '2-digit' }) : 'TBD';
-    
+
     // Check if we have real market data (not just a default 0.5)
     // The backend defaults to 0.5 when there's no market data
     // Real market data exists if volume > 0 OR (volume is 0 but prob is not exactly 0.5)
     const rawMarketProb = prediction.home_kalshi_prob ?? prediction.kalshi_prob;
-    const hasRealMarketData = market_data.volume > 0 || 
+    const hasRealMarketData = market_data.volume > 0 ||
         (rawMarketProb !== undefined && rawMarketProb !== 0.5);
-    
+
     // Only use market probability if we have real market data, otherwise use model prob
     const marketProb = hasRealMarketData && rawMarketProb !== undefined
         ? rawMarketProb
         : prediction.home_win_prob; // Fallback to model if no real market data
-    
+
     const dislocation = ((prediction.home_win_prob - marketProb) * 100).toFixed(1);
-    const divergence = ((analytics?.stat_divergence ?? prediction.divergence) * 100).toFixed(1);
     const formatCents = (value?: number | null) => typeof value === 'number' ? `${(value * 100).toFixed(1)}¢` : '—';
     const formatDollars = (value?: number | null) => typeof value === 'number' ? `$${value.toLocaleString()}` : '—';
 
     const probabilityBreakdown = [
         { label: `${game.home_abbr} stats`, value: prediction.stat_model_prob, tone: 'from-blue-500/60 to-blue-400/30' },
-        { label: `${game.home_abbr} ensemble`, value: prediction.stat_ensemble_prob ?? prediction.ml_prob ?? 0.5, tone: 'from-purple-500/60 to-purple-400/30' },
+        { label: `${game.home_abbr} ensemble`, value: prediction.stat_ensemble_prob ?? 0.5, tone: 'from-purple-500/60 to-purple-400/30' },
         { label: `${game.home_abbr} blended`, value: prediction.home_win_prob, tone: 'from-emerald-500/70 to-emerald-400/30' },
         { label: `${game.home_abbr} market`, value: marketProb, tone: 'from-zinc-500/60 to-zinc-400/20' },
     ];
@@ -209,6 +204,49 @@ const GameAnalyticsModal: React.FC<GameAnalyticsModalProps> = ({ game, onClose, 
 
         return (
             <div className="space-y-5 md:space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
+                {/* Smart Bet Recommendation */}
+                {game?.prediction?.suggested_wager && (
+                    <div className="rounded-2xl border border-indigo-500/30 bg-indigo-500/10 p-4 relative overflow-hidden">
+                        <div className="absolute top-0 right-0 p-3 opacity-10">
+                            <Sparkles size={80} />
+                        </div>
+                        <div className="relative z-10">
+                            <div className="flex items-center justify-between mb-3">
+                                <h3 className="text-xs font-bold text-indigo-400 uppercase tracking-widest flex items-center gap-1.5">
+                                    <Sparkles size={12} />
+                                    Smart Bet Recommendation
+                                </h3>
+                                <span className={cn(
+                                    "text-[10px] px-2 py-0.5 rounded-full font-medium uppercase border",
+                                    game.prediction.signal_strength === 'STRONG' ? "bg-emerald-500/20 text-emerald-400 border-emerald-500/30" :
+                                        game.prediction.signal_strength === 'MODERATE' ? "bg-amber-500/20 text-amber-400 border-amber-500/30" :
+                                            "bg-zinc-500/20 text-zinc-400 border-zinc-500/30"
+                                )}>
+                                    {game.prediction.signal_strength} Confidence
+                                </span>
+                            </div>
+                            <div className="grid grid-cols-2 gap-4 mb-3">
+                                <div>
+                                    <p className="text-xs text-zinc-400 mb-1 font-medium">Predicted Winner</p>
+                                    <p className="text-lg font-bold text-white tracking-tight">{game.prediction.predicted_winner || 'Toss Up'}</p>
+                                </div>
+                                <div className="text-right">
+                                    <p className="text-xs text-zinc-400 mb-1 font-medium">Smart Bet</p>
+                                    <p className="text-lg font-bold text-emerald-400 tracking-tight">{game.prediction.recommendation}</p>
+                                    <p className="text-xs font-mono text-zinc-500 mt-0.5">{game.prediction.suggested_wager}</p>
+                                </div>
+                            </div>
+                            {game.prediction.value_proposition && (
+                                <div className="mt-3 pt-3 border-t border-indigo-500/20">
+                                    <p className="text-xs text-indigo-300/80 leading-relaxed">
+                                        <span className="font-semibold text-indigo-300">Why? </span>
+                                        {game.prediction.value_proposition}
+                                    </p>
+                                </div>
+                            )}
+                        </div>
+                    </div>
+                )}
                 {/* Key Insights */}
                 {insights.length > 0 && (
                     <div className="space-y-3">
@@ -223,8 +261,8 @@ const GameAnalyticsModal: React.FC<GameAnalyticsModalProps> = ({ game, onClose, 
                                     className={cn(
                                         "rounded-2xl border p-4 transition-all",
                                         insight.priority >= 8 ? "border-emerald-500/30 bg-emerald-500/5" :
-                                        insight.priority >= 6 ? "border-amber-500/30 bg-amber-500/5" :
-                                        "border-zinc-800 bg-zinc-900/40"
+                                            insight.priority >= 6 ? "border-amber-500/30 bg-amber-500/5" :
+                                                "border-zinc-800 bg-zinc-900/40"
                                     )}
                                 >
                                     <div className="flex items-start justify-between mb-2">
@@ -234,8 +272,8 @@ const GameAnalyticsModal: React.FC<GameAnalyticsModalProps> = ({ game, onClose, 
                                                 <span className={cn(
                                                     "text-[10px] px-2 py-0.5 rounded-full font-medium",
                                                     insight.confidence === 'HIGH' ? "bg-emerald-500/20 text-emerald-400" :
-                                                    insight.confidence === 'MEDIUM' ? "bg-amber-500/20 text-amber-400" :
-                                                    "bg-zinc-500/20 text-zinc-400"
+                                                        insight.confidence === 'MEDIUM' ? "bg-amber-500/20 text-amber-400" :
+                                                            "bg-zinc-500/20 text-zinc-400"
                                                 )}>
                                                     {insight.confidence}
                                                 </span>
@@ -297,9 +335,9 @@ const GameAnalyticsModal: React.FC<GameAnalyticsModalProps> = ({ game, onClose, 
                                             <span className={cn(
                                                 "text-xs font-bold px-2 py-0.5 rounded",
                                                 side.form.strength === 'STRONG' ? "bg-emerald-500/20 text-emerald-400" :
-                                                side.form.strength === 'GOOD' ? "bg-blue-500/20 text-blue-400" :
-                                                side.form.strength === 'WEAK' ? "bg-rose-500/20 text-rose-400" :
-                                                "bg-zinc-500/20 text-zinc-400"
+                                                    side.form.strength === 'GOOD' ? "bg-blue-500/20 text-blue-400" :
+                                                        side.form.strength === 'WEAK' ? "bg-rose-500/20 text-rose-400" :
+                                                            "bg-zinc-500/20 text-zinc-400"
                                             )}>
                                                 {side.form.strength}
                                             </span>
@@ -390,11 +428,11 @@ const GameAnalyticsModal: React.FC<GameAnalyticsModalProps> = ({ game, onClose, 
         if (contextLoading) {
             return (
                 <div className="flex flex-col items-center justify-center h-40 text-zinc-500 text-xs">
-                     <div className="flex items-center mb-2">
-                         <div className="w-4 h-4 border-2 border-zinc-600 border-t-emerald-400 rounded-full animate-spin mr-2" />
-                         Fetching environmental data...
-                     </div>
-                     <div className="text-[10px] text-zinc-600 mt-2">This may take up to 30 seconds</div>
+                    <div className="flex items-center mb-2">
+                        <div className="w-4 h-4 border-2 border-zinc-600 border-t-emerald-400 rounded-full animate-spin mr-2" />
+                        Fetching environmental data...
+                    </div>
+                    <div className="text-[10px] text-zinc-600 mt-2">This may take up to 30 seconds</div>
                 </div>
             );
         }
@@ -431,7 +469,7 @@ const GameAnalyticsModal: React.FC<GameAnalyticsModalProps> = ({ game, onClose, 
             <div className="space-y-5 animate-in fade-in slide-in-from-bottom-4 duration-500">
                 {/* Weather */}
                 <div className="rounded-2xl border border-zinc-800 bg-zinc-900/40 p-4">
-                     <h3 className="text-xs font-bold text-zinc-400 uppercase tracking-widest flex items-center gap-1.5 mb-3">
+                    <h3 className="text-xs font-bold text-zinc-400 uppercase tracking-widest flex items-center gap-1.5 mb-3">
                         <Cloud size={12} className="text-blue-300" />
                         Weather Conditions in {contextData.weather?.location || 'Unknown'}
                     </h3>
@@ -460,15 +498,15 @@ const GameAnalyticsModal: React.FC<GameAnalyticsModalProps> = ({ game, onClose, 
                                 <div className={cn(
                                     "rounded-2xl border p-4 mt-4",
                                     contextData.weather.correlation_impact.severity === 'HIGH' ? "border-amber-500/30 bg-amber-500/5" :
-                                    contextData.weather.correlation_impact.severity === 'MEDIUM' ? "border-blue-500/30 bg-blue-500/5" :
-                                    "border-zinc-800 bg-zinc-900/40"
+                                        contextData.weather.correlation_impact.severity === 'MEDIUM' ? "border-blue-500/30 bg-blue-500/5" :
+                                            "border-zinc-800 bg-zinc-900/40"
                                 )}>
                                     <h3 className="text-xs font-bold text-zinc-400 uppercase tracking-widest mb-2 flex items-center gap-1.5">
                                         <AlertCircle size={12} className="text-amber-400" />
                                         Weather Impact Analysis
                                     </h3>
                                     <p className="text-xs text-zinc-300 mb-2">{contextData.weather.correlation_impact.note}</p>
-                                    {contextData.weather.correlation_impact.factors.length > 0 && (
+                                    {Array.isArray(contextData.weather.correlation_impact.factors) && contextData.weather.correlation_impact.factors.length > 0 && (
                                         <div className="space-y-1">
                                             {contextData.weather.correlation_impact.factors.map((factor, idx) => (
                                                 <div key={idx} className="text-xs text-zinc-400 flex items-start gap-2">
@@ -489,34 +527,68 @@ const GameAnalyticsModal: React.FC<GameAnalyticsModalProps> = ({ game, onClose, 
                     <div className="rounded-2xl border border-zinc-800 bg-zinc-900/40 p-4">
                         <h3 className="text-xs font-bold text-zinc-400 uppercase tracking-widest flex items-center gap-1.5 mb-3">
                             <UserMinus size={12} className="text-rose-400" />
-                            AI Injury Impact Analysis
+                            Injury Impact Analysis
                         </h3>
                         <div className="space-y-4">
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                                 {[
-                                    { team: game.home_abbr, impact: contextData.injury_analysis.home_impact },
-                                    { team: game.away_abbr, impact: contextData.injury_analysis.away_impact }
+                                    { team: game.home_abbr, impact: contextData.injury_analysis.home_impact, raw: contextData.injuries?.home },
+                                    { team: game.away_abbr, impact: contextData.injury_analysis.away_impact, raw: contextData.injuries?.away }
                                 ].map((side, idx) => (
                                     <div key={idx} className={cn(
-                                        "p-3 rounded-xl border",
+                                        "p-3 rounded-xl border flex flex-col h-full",
                                         side.impact?.severity === 'CRITICAL' ? "border-rose-500/30 bg-rose-500/5" :
-                                        side.impact?.severity === 'HIGH' ? "border-amber-500/30 bg-amber-500/5" :
-                                        "border-zinc-800 bg-zinc-900/50"
+                                            side.impact?.severity === 'HIGH' ? "border-amber-500/30 bg-amber-500/5" :
+                                                "border-zinc-800 bg-zinc-900/50"
                                     )}>
                                         <div className="flex items-center justify-between mb-2">
                                             <span className="text-xs font-bold text-zinc-300">{side.team}</span>
                                             <span className={cn("text-[10px] px-2 py-0.5 rounded-full font-medium",
                                                 side.impact?.severity === 'CRITICAL' ? "bg-rose-500/20 text-rose-400" :
-                                                side.impact?.severity === 'HIGH' ? "bg-amber-500/20 text-amber-400" :
-                                                "bg-zinc-500/20 text-zinc-400"
+                                                    side.impact?.severity === 'HIGH' ? "bg-amber-500/20 text-amber-400" :
+                                                        "bg-zinc-500/20 text-zinc-400"
                                             )}>
                                                 {side.impact?.severity || 'UNKNOWN'}
                                             </span>
                                         </div>
                                         <p className="text-xs text-zinc-400 mb-2">{side.impact?.summary || 'No impact analysis available'}</p>
-                                        {side.impact?.key_missing && side.impact.key_missing.length > 0 && (
-                                            <div className="text-[10px] text-rose-300">
-                                                Missing: {side.impact.key_missing.join(", ")}
+
+                                        {/* Key Players Out */}
+                                        {side.impact?.key_players_out && side.impact.key_players_out.length > 0 && (
+                                            <div className="mb-3">
+                                                <div className="text-[10px] text-rose-400 font-semibold mb-1">Key Players Out:</div>
+                                                <div className="flex flex-wrap gap-1">
+                                                    {side.impact.key_players_out.map((p: any, i: number) => (
+                                                        <span key={i} className="text-[10px] px-1.5 py-0.5 bg-rose-500/10 text-rose-300 rounded border border-rose-500/20">
+                                                            {p.name} ({p.position})
+                                                        </span>
+                                                    ))}
+                                                </div>
+                                            </div>
+                                        )}
+
+                                        {/* Full Injury List */}
+                                        {side.raw && side.raw.length > 0 && (
+                                            <div className="mt-auto pt-2 border-t border-zinc-800/50">
+                                                <div className="text-[10px] text-zinc-500 uppercase tracking-wider mb-1.5">Full Report ({side.raw.length})</div>
+                                                <div className="max-h-32 overflow-y-auto space-y-1 pr-1 custom-scrollbar">
+                                                    {side.raw.map((injury: any, i: number) => (
+                                                        <div key={i} className="flex items-center justify-between text-[10px] bg-black/20 p-1.5 rounded">
+                                                            <span className="text-zinc-300 truncate max-w-[120px]" title={injury.player_name}>
+                                                                {injury.player_name} <span className="text-zinc-500">({injury.position})</span>
+                                                            </span>
+                                                            <span className={cn(
+                                                                "px-1.5 rounded text-[9px] font-medium",
+                                                                injury.status.toUpperCase() === 'OUT' ? "bg-rose-500/20 text-rose-400" :
+                                                                    injury.status.toUpperCase().includes('DOUBT') ? "bg-orange-500/20 text-orange-400" :
+                                                                        injury.status.toUpperCase().includes('QUEST') ? "bg-amber-500/20 text-amber-400" :
+                                                                            "bg-zinc-500/20 text-zinc-400"
+                                                            )}>
+                                                                {injury.status}
+                                                            </span>
+                                                        </div>
+                                                    ))}
+                                                </div>
                                             </div>
                                         )}
                                     </div>
@@ -532,8 +604,54 @@ const GameAnalyticsModal: React.FC<GameAnalyticsModalProps> = ({ game, onClose, 
                     </div>
                 )}
 
+                {/* Recent Form (Context) */}
+                {analytics?.recent_form && (
+                    <div className="rounded-2xl border border-zinc-800 bg-zinc-900/40 p-4">
+                        <h3 className="text-xs font-bold text-zinc-400 uppercase tracking-widest flex items-center gap-1.5 mb-3">
+                            <Activity size={12} className="text-blue-400" />
+                            Recent Form Context
+                        </h3>
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            {[
+                                { team: game.home_abbr, form: analytics.recent_form.home, label: 'Home' },
+                                { team: game.away_abbr, form: analytics.recent_form.away, label: 'Away' }
+                            ].map((side, idx) => (
+                                <div key={idx} className="p-3 bg-zinc-900/50 rounded-xl border border-zinc-800/50">
+                                    <div className="flex justify-between items-center mb-2">
+                                        <span className="text-xs font-bold text-zinc-300">{side.label} ({side.team})</span>
+                                        <span className={cn(
+                                            "text-[10px] px-2 py-0.5 rounded font-medium",
+                                            side.form.strength === 'STRONG' ? "bg-emerald-500/20 text-emerald-400" :
+                                                side.form.strength === 'GOOD' ? "bg-blue-500/20 text-blue-400" :
+                                                    side.form.strength === 'WEAK' ? "bg-rose-500/20 text-rose-400" :
+                                                        "bg-zinc-500/20 text-zinc-400"
+                                        )}>
+                                            {side.form.strength} FORM
+                                        </span>
+                                    </div>
+                                    <div className="grid grid-cols-2 gap-2 text-xs">
+                                        <div className="bg-black/20 p-2 rounded">
+                                            <div className="text-zinc-500 text-[10px] mb-0.5">Win Rate</div>
+                                            <div className="text-white font-mono">{(side.form.win_pct * 100).toFixed(0)}%</div>
+                                        </div>
+                                        <div className="bg-black/20 p-2 rounded">
+                                            <div className="text-zinc-500 text-[10px] mb-0.5">Avg Margin</div>
+                                            <div className={cn(
+                                                "font-mono",
+                                                side.form.avg_point_diff > 0 ? "text-emerald-400" : "text-rose-400"
+                                            )}>
+                                                {side.form.avg_point_diff > 0 ? '+' : ''}{side.form.avg_point_diff.toFixed(1)}
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
+                    </div>
+                )}
+
                 {/* Betting Intelligence */}
-                {contextData.betting_intelligence && contextData.betting_intelligence.length > 0 && (
+                {Array.isArray(contextData.betting_intelligence) && contextData.betting_intelligence.length > 0 && (
                     <div className="rounded-2xl border border-zinc-800 bg-zinc-900/40 p-4">
                         <h3 className="text-xs font-bold text-zinc-400 uppercase tracking-widest flex items-center gap-1.5 mb-3">
                             <TrendingUp size={12} className="text-emerald-400" />
@@ -544,9 +662,9 @@ const GameAnalyticsModal: React.FC<GameAnalyticsModalProps> = ({ game, onClose, 
                                 <div key={idx} className="p-3 bg-zinc-900/50 rounded-xl border border-zinc-800/50">
                                     <div className="flex items-center justify-between mb-1">
                                         <span className="text-[10px] text-zinc-500 uppercase tracking-wider">{item.type.replace(/_/g, ' ')}</span>
-                                        <span className={cn("text-[10px] font-bold", 
-                                            item.impact === 'HIGH' ? "text-emerald-400" : 
-                                            item.impact === 'MEDIUM' ? "text-amber-400" : "text-zinc-500"
+                                        <span className={cn("text-[10px] font-bold",
+                                            item.impact === 'HIGH' ? "text-emerald-400" :
+                                                item.impact === 'MEDIUM' ? "text-amber-400" : "text-zinc-500"
                                         )}>{item.impact} Impact</span>
                                     </div>
                                     <p className="text-xs text-zinc-300">{item.description}</p>
@@ -556,40 +674,10 @@ const GameAnalyticsModal: React.FC<GameAnalyticsModalProps> = ({ game, onClose, 
                     </div>
                 )}
 
-                {/* Social Sentiment */}
-                {contextData.social_sentiment && (
-                    <div className="rounded-2xl border border-zinc-800 bg-zinc-900/40 p-4">
-                        <h3 className="text-xs font-bold text-zinc-400 uppercase tracking-widest flex items-center gap-1.5 mb-3">
-                            <MessageSquare size={12} className="text-blue-400" />
-                            Social Sentiment
-                        </h3>
-                        <div className="grid grid-cols-2 gap-4 mb-3">
-                            <div className="p-3 bg-zinc-900/50 rounded-xl border border-zinc-800/50 text-center">
-                                <div className="text-[10px] text-zinc-500 uppercase mb-1">{game.home_abbr} Sentiment</div>
-                                <div className="text-lg font-bold text-white">{(contextData.social_sentiment.home_sentiment * 100).toFixed(0)}%</div>
-                                <div className="h-1 bg-zinc-800 rounded-full mt-2 overflow-hidden">
-                                    <div className="h-full bg-blue-500" style={{ width: `${contextData.social_sentiment.home_sentiment * 100}%` }} />
-                                </div>
-                            </div>
-                            <div className="p-3 bg-zinc-900/50 rounded-xl border border-zinc-800/50 text-center">
-                                <div className="text-[10px] text-zinc-500 uppercase mb-1">{game.away_abbr} Sentiment</div>
-                                <div className="text-lg font-bold text-white">{(contextData.social_sentiment.away_sentiment * 100).toFixed(0)}%</div>
-                                <div className="h-1 bg-zinc-800 rounded-full mt-2 overflow-hidden">
-                                    <div className="h-full bg-blue-500" style={{ width: `${contextData.social_sentiment.away_sentiment * 100}%` }} />
-                                </div>
-                            </div>
-                        </div>
-                        <p className="text-xs text-zinc-400 italic mb-2">"{contextData.social_sentiment.summary}"</p>
-                        <div className="flex flex-wrap gap-2">
-                            {contextData.social_sentiment.trending_topics.map((topic, idx) => (
-                                <span key={idx} className="text-[10px] px-2 py-1 bg-zinc-800 rounded-md text-zinc-300">#{topic}</span>
-                            ))}
-                        </div>
-                    </div>
-                )}
+
 
                 {/* Expert Predictions */}
-                {contextData.expert_predictions && contextData.expert_predictions.length > 0 && (
+                {Array.isArray(contextData.expert_predictions) && contextData.expert_predictions.length > 0 && (
                     <div className="rounded-2xl border border-zinc-800 bg-zinc-900/40 p-4">
                         <h3 className="text-xs font-bold text-zinc-400 uppercase tracking-widest flex items-center gap-1.5 mb-3">
                             <Users size={12} className="text-amber-400" />
@@ -604,8 +692,8 @@ const GameAnalyticsModal: React.FC<GameAnalyticsModalProps> = ({ game, onClose, 
                                     </div>
                                     <div className={cn("text-[10px] px-2 py-0.5 rounded-full font-medium",
                                         pick.confidence === 'HIGH' ? "bg-emerald-500/20 text-emerald-400" :
-                                        pick.confidence === 'MEDIUM' ? "bg-amber-500/20 text-amber-400" :
-                                        "bg-zinc-500/20 text-zinc-400"
+                                            pick.confidence === 'MEDIUM' ? "bg-amber-500/20 text-amber-400" :
+                                                "bg-zinc-500/20 text-zinc-400"
                                     )}>
                                         {pick.confidence}
                                     </div>
@@ -615,37 +703,37 @@ const GameAnalyticsModal: React.FC<GameAnalyticsModalProps> = ({ game, onClose, 
                     </div>
                 )}
 
-                 {/* News */}
-                 <div className="rounded-2xl border border-zinc-800 bg-zinc-900/40 p-4">
-                     <h3 className="text-xs font-bold text-zinc-400 uppercase tracking-widest flex items-center gap-1.5 mb-3">
+                {/* News */}
+                <div className="rounded-2xl border border-zinc-800 bg-zinc-900/40 p-4">
+                    <h3 className="text-xs font-bold text-zinc-400 uppercase tracking-widest flex items-center gap-1.5 mb-3">
                         <Newspaper size={12} className="text-purple-400" />
                         Latest Intelligence
                     </h3>
                     <div className="space-y-2">
-                         {contextData.news.map((item, idx) => (
-                             <a 
-                                key={idx} 
-                                href={item.url} 
-                                target="_blank" 
+                        {Array.isArray(contextData.news) && contextData.news.map((item, idx) => (
+                            <a
+                                key={idx}
+                                href={item.url}
+                                target="_blank"
                                 rel="noopener noreferrer"
                                 className="block p-3 bg-zinc-900/50 rounded-xl border border-zinc-800/50 hover:border-zinc-700 transition-colors cursor-pointer group"
-                             >
-                                 <div className="flex justify-between items-start">
-                                     <div className="text-sm text-zinc-300 font-medium group-hover:text-white transition-colors">{item.headline}</div>
-                                     <div className={cn("text-[10px] px-1.5 py-0.5 rounded ml-2 whitespace-nowrap",
+                            >
+                                <div className="flex justify-between items-start">
+                                    <div className="text-sm text-zinc-300 font-medium group-hover:text-white transition-colors">{item.headline}</div>
+                                    <div className={cn("text-[10px] px-1.5 py-0.5 rounded ml-2 whitespace-nowrap",
                                         item.sentiment === 'POSITIVE' ? "bg-emerald-500/10 text-emerald-400" :
-                                        item.sentiment === 'NEGATIVE' ? "bg-rose-500/10 text-rose-400" :
-                                        "bg-zinc-500/10 text-zinc-500"
-                                     )}>{item.sentiment}</div>
-                                 </div>
-                                 <div className="text-[10px] text-zinc-600 mt-1">{item.source}</div>
-                             </a>
-                         ))}
-                         {contextData.news.length === 0 && (
-                             <div className="text-center text-zinc-500 py-4 text-xs italic">No recent news found</div>
-                         )}
+                                            item.sentiment === 'NEGATIVE' ? "bg-rose-500/10 text-rose-400" :
+                                                "bg-zinc-500/10 text-zinc-500"
+                                    )}>{item.sentiment}</div>
+                                </div>
+                                <div className="text-[10px] text-zinc-600 mt-1">{item.source}</div>
+                            </a>
+                        ))}
+                        {(!Array.isArray(contextData.news) || contextData.news.length === 0) && (
+                            <div className="text-center text-zinc-500 py-4 text-xs italic">No recent news found</div>
+                        )}
                     </div>
-                 </div>
+                </div>
             </div>
         );
     };
@@ -656,7 +744,7 @@ const GameAnalyticsModal: React.FC<GameAnalyticsModalProps> = ({ game, onClose, 
             { name: 'Blended', value: prediction.home_win_prob * 100, color: '#3b82f6' },
             { name: 'Market', value: marketProb * 100, color: '#71717a' },
             { name: 'Stats', value: prediction.stat_model_prob * 100, color: '#10b981' },
-            { name: 'Ensemble', value: (prediction.stat_ensemble_prob ?? prediction.ml_prob ?? 0.5) * 100, color: '#8b5cf6' },
+            { name: 'Ensemble', value: (prediction.stat_ensemble_prob ?? 0.5) * 100, color: '#8b5cf6' },
         ];
 
         // Model weights data
@@ -698,6 +786,7 @@ const GameAnalyticsModal: React.FC<GameAnalyticsModalProps> = ({ game, onClose, 
             { feature: 'Home\nAdvantage', value: (analytics.model_features.home_advantage + 1) * 50 },
             { feature: 'Record\nDiff', value: (analytics.model_features.record_diff + 1) * 50 },
             { feature: 'Recent\nForm', value: (analytics.model_features.recent_form + 1) * 50 },
+            { feature: 'Injury\nImpact', value: ((analytics.model_features.injury_impact || 0) + 1) * 50 },
         ] : [];
 
         const COLORS = ['#10b981', '#3b82f6', '#f59e0b', '#ef4444', '#8b5cf6'];
@@ -712,7 +801,7 @@ const GameAnalyticsModal: React.FC<GameAnalyticsModalProps> = ({ game, onClose, 
                                 <div className="w-2 h-2 rounded-full" style={{ backgroundColor: p.color }}></div>
                                 <span className="text-zinc-400">{p.name}:</span>
                                 <span className="font-mono font-medium text-white">
-                                    {typeof p.value === 'number' 
+                                    {typeof p.value === 'number'
                                         ? p.name.includes('Margin') || p.name.includes('Diff')
                                             ? `${p.value > 0 ? '+' : ''}${p.value.toFixed(1)}`
                                             : `${p.value.toFixed(1)}%`
@@ -735,17 +824,17 @@ const GameAnalyticsModal: React.FC<GameAnalyticsModalProps> = ({ game, onClose, 
                         <Target size={12} className="text-primary" />
                         Probability Comparison
                     </h3>
-                        <div className="h-64 bg-zinc-900/30 rounded-2xl border border-zinc-800/50 p-4 chart-container">
+                    <div className="h-64 bg-zinc-900/30 rounded-2xl border border-zinc-800/50 p-4 chart-container">
                         <ResponsiveContainer width="100%" height="100%">
                             <BarChart data={probabilityData} margin={{ top: 15, right: 15, bottom: 5, left: 5 }}>
                                 <CartesianGrid strokeDasharray="3 3" stroke="#27272a" vertical={false} />
-                                <XAxis 
-                                    dataKey="name" 
+                                <XAxis
+                                    dataKey="name"
                                     stroke="#71717a"
                                     tick={{ fontSize: 11, fill: '#a1a1aa' }}
                                     tickLine={false}
                                 />
-                                <YAxis 
+                                <YAxis
                                     stroke="#71717a"
                                     tick={{ fontSize: 11, fill: '#a1a1aa' }}
                                     tickLine={false}
@@ -801,7 +890,7 @@ const GameAnalyticsModal: React.FC<GameAnalyticsModalProps> = ({ game, onClose, 
                                         </div>
                                         <div className="h-2 bg-zinc-800 rounded-full overflow-hidden">
                                             <div
-                                                style={{ 
+                                                style={{
                                                     width: `${item.value}%`,
                                                     backgroundColor: COLORS[idx % COLORS.length]
                                                 }}
@@ -825,13 +914,13 @@ const GameAnalyticsModal: React.FC<GameAnalyticsModalProps> = ({ game, onClose, 
                         <ResponsiveContainer width="100%" height="100%">
                             <BarChart data={marketDepthData} margin={{ top: 10, right: 10, bottom: 5, left: 0 }}>
                                 <CartesianGrid strokeDasharray="3 3" stroke="#27272a" vertical={false} />
-                                <XAxis 
-                                    dataKey="name" 
+                                <XAxis
+                                    dataKey="name"
                                     stroke="#71717a"
                                     tick={{ fontSize: 11, fill: '#a1a1aa' }}
                                     tickLine={false}
                                 />
-                                <YAxis 
+                                <YAxis
                                     stroke="#71717a"
                                     tick={{ fontSize: 11, fill: '#a1a1aa' }}
                                     tickLine={false}
@@ -841,9 +930,9 @@ const GameAnalyticsModal: React.FC<GameAnalyticsModalProps> = ({ game, onClose, 
                                 <Tooltip content={<CustomTooltip />} />
                                 <Bar dataKey="value" radius={[8, 8, 0, 0]}>
                                     {marketDepthData.map((entry, index) => (
-                                        <Cell 
-                                            key={`cell-${index}`} 
-                                            fill={entry.type === 'Bid' ? '#ef4444' : entry.type === 'Ask' ? '#10b981' : '#71717a'} 
+                                        <Cell
+                                            key={`cell-${index}`}
+                                            fill={entry.type === 'Bid' ? '#ef4444' : entry.type === 'Ask' ? '#10b981' : '#71717a'}
                                         />
                                     ))}
                                 </Bar>
@@ -880,13 +969,13 @@ const GameAnalyticsModal: React.FC<GameAnalyticsModalProps> = ({ game, onClose, 
                             <ResponsiveContainer width="100%" height="100%">
                                 <BarChart data={eloData} margin={{ top: 10, right: 10, bottom: 5, left: 0 }}>
                                     <CartesianGrid strokeDasharray="3 3" stroke="#27272a" vertical={false} />
-                                    <XAxis 
-                                        dataKey="team" 
+                                    <XAxis
+                                        dataKey="team"
                                         stroke="#71717a"
                                         tick={{ fontSize: 11, fill: '#a1a1aa' }}
                                         tickLine={false}
                                     />
-                                    <YAxis 
+                                    <YAxis
                                         stroke="#71717a"
                                         tick={{ fontSize: 11, fill: '#a1a1aa' }}
                                         tickLine={false}
@@ -895,9 +984,9 @@ const GameAnalyticsModal: React.FC<GameAnalyticsModalProps> = ({ game, onClose, 
                                     <Tooltip content={<CustomTooltip />} />
                                     <Bar dataKey="rating" radius={[8, 8, 0, 0]}>
                                         {eloData.map((_, index) => (
-                                            <Cell 
-                                                key={`cell-${index}`} 
-                                                fill={index === 0 ? '#3b82f6' : '#ef4444'} 
+                                            <Cell
+                                                key={`cell-${index}`}
+                                                fill={index === 0 ? '#3b82f6' : '#ef4444'}
                                             />
                                         ))}
                                     </Bar>
@@ -918,24 +1007,24 @@ const GameAnalyticsModal: React.FC<GameAnalyticsModalProps> = ({ game, onClose, 
                             <ResponsiveContainer width="100%" height="100%">
                                 <BarChart data={formData} margin={{ top: 10, right: 10, bottom: 5, left: 0 }}>
                                     <CartesianGrid strokeDasharray="3 3" stroke="#27272a" vertical={false} />
-                                    <XAxis 
-                                        dataKey="name" 
+                                    <XAxis
+                                        dataKey="name"
                                         stroke="#71717a"
                                         tick={{ fontSize: 11, fill: '#a1a1aa' }}
                                         tickLine={false}
                                     />
-                                    <YAxis 
+                                    <YAxis
                                         stroke="#71717a"
                                         tick={{ fontSize: 11, fill: '#a1a1aa' }}
                                         tickLine={false}
                                     />
                                     <Tooltip content={<CustomTooltip />} />
-                                    <Legend 
+                                    <Legend
                                         wrapperStyle={{ fontSize: '11px', color: '#a1a1aa' }}
                                         iconType="circle"
                                     />
                                     <Bar dataKey={game.home_abbr} fill="#3b82f6" radius={[4, 4, 0, 0]} />
-                                <Bar dataKey={game.away_abbr} fill="#ef4444" radius={[4, 4, 0, 0]} />
+                                    <Bar dataKey={game.away_abbr} fill="#ef4444" radius={[4, 4, 0, 0]} />
                                 </BarChart>
                             </ResponsiveContainer>
                         </div>
@@ -953,20 +1042,20 @@ const GameAnalyticsModal: React.FC<GameAnalyticsModalProps> = ({ game, onClose, 
                             <ResponsiveContainer width="100%" height="100%">
                                 <RadarChart data={radarData}>
                                     <PolarGrid stroke="#27272a" />
-                                    <PolarAngleAxis 
-                                        dataKey="feature" 
+                                    <PolarAngleAxis
+                                        dataKey="feature"
                                         tick={{ fontSize: 10, fill: '#a1a1aa' }}
                                     />
-                                    <PolarRadiusAxis 
-                                        angle={90} 
+                                    <PolarRadiusAxis
+                                        angle={90}
                                         domain={[0, 100]}
                                         tick={{ fontSize: 10, fill: '#71717a' }}
                                     />
-                                    <Radar 
-                                        name="Strength" 
-                                        dataKey="value" 
-                                        stroke="#10b981" 
-                                        fill="#10b981" 
+                                    <Radar
+                                        name="Strength"
+                                        dataKey="value"
+                                        stroke="#10b981"
+                                        fill="#10b981"
                                         fillOpacity={0.3}
                                     />
                                     <Tooltip content={<CustomTooltip />} />
@@ -1020,14 +1109,14 @@ const GameAnalyticsModal: React.FC<GameAnalyticsModalProps> = ({ game, onClose, 
                                 </div>
                                 <div className="mt-2 h-2 bg-zinc-800 rounded-full overflow-hidden">
                                     <div
-                                        style={{ 
+                                        style={{
                                             width: `${Math.min(Math.abs(Number(dislocation)), 50)}%`,
                                             marginLeft: Number(dislocation) < 0 ? 'auto' : '0'
                                         }}
                                         className={cn(
                                             "h-full",
-                                            Number(dislocation) >= 0 
-                                                ? "bg-gradient-to-r from-emerald-500 to-emerald-400" 
+                                            Number(dislocation) >= 0
+                                                ? "bg-gradient-to-r from-emerald-500 to-emerald-400"
                                                 : "bg-gradient-to-l from-rose-500 to-rose-400"
                                         )}
                                     />
@@ -1036,16 +1125,16 @@ const GameAnalyticsModal: React.FC<GameAnalyticsModalProps> = ({ game, onClose, 
                         </div>
                     </div>
                 </div>
-            </div>
+            </div >
         );
     };
 
     return (
-        <motion.div 
+        <motion.div
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm"
+            className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm"
             onClick={onClose}
         >
             <motion.div
@@ -1053,117 +1142,89 @@ const GameAnalyticsModal: React.FC<GameAnalyticsModalProps> = ({ game, onClose, 
                 animate={{ scale: 1, opacity: 1, y: 0 }}
                 exit={{ scale: 0.95, opacity: 0, y: 20 }}
                 onClick={(e) => e.stopPropagation()}
-                className="w-full max-w-2xl bg-zinc-900/95 border border-zinc-800 rounded-3xl shadow-2xl overflow-hidden backdrop-blur-xl relative max-h-[90vh] flex flex-col"
+                className="w-full max-w-5xl bg-zinc-950 border border-zinc-800 rounded-2xl shadow-2xl overflow-hidden flex flex-col max-h-[90vh]"
             >
-                <button 
-                    onClick={onClose}
-                    className="absolute top-4 right-4 p-1.5 text-zinc-500 hover:text-white hover:bg-zinc-800 rounded-full transition-all z-10"
-                >
-                    <X size={18} />
-                </button>
-
-                <div className="flex-1 flex flex-col overflow-hidden">
-                    {/* Header */}
-                    <div className="p-5 md:p-6 pb-0 space-y-4 flex-shrink-0">
-                        <div className="flex flex-wrap items-center justify-between gap-3">
-                            <div>
-                                <p className="text-[11px] uppercase tracking-[0.3em] text-zinc-500">{game.league?.toUpperCase() ?? 'NBA'}</p>
-                                <h2 className="text-xl md:text-2xl font-bold text-white tracking-tight">{game.away_team} @ {game.home_team}</h2>
-                                <p className="text-xs text-zinc-500">{game.status}</p>
+                {/* Header */}
+                <div className="p-6 border-b border-zinc-800 bg-zinc-900/50">
+                    <div className="flex items-start justify-between mb-6">
+                        <div>
+                            <div className="flex items-center gap-3 mb-2">
+                                <h2 className="text-2xl font-bold text-white tracking-tight">
+                                    {game.away_team} <span className="text-zinc-500">@</span> {game.home_team}
+                                </h2>
+                                <div className={cn("px-2 py-0.5 rounded text-xs font-bold border",
+                                    prediction.confidence_score === 'HIGH' ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/20" :
+                                        prediction.confidence_score === 'MEDIUM' ? "bg-amber-500/10 text-amber-400 border-amber-500/20" :
+                                            "bg-zinc-500/10 text-zinc-400 border-zinc-500/20"
+                                )}>
+                                    {prediction.confidence_score} CONFIDENCE
+                                </div>
+                                {game.status === 'live' && (
+                                    <div className="px-2 py-0.5 rounded text-xs font-bold bg-red-500/10 text-red-500 border border-red-500/20 animate-pulse flex items-center gap-1">
+                                        <div className="w-1.5 h-1.5 rounded-full bg-red-500" />
+                                        LIVE
+                                    </div>
+                                )}
                             </div>
-                            <div className={cn("px-3 py-1 rounded-full bg-zinc-900/80 border border-zinc-800 flex items-center gap-2 shadow-lg text-xs font-semibold uppercase", recommendationColor)}>
-                                {prediction.recommendation.includes("Follow") ? <TrendingUp size={14} /> : 
-                                 prediction.recommendation.includes("Fade") ? <TrendingDown size={14} /> : 
-                                 <Activity size={14} />}
-                                {prediction.recommendation}
+                            <div className="flex items-center gap-4 text-sm text-zinc-400">
+                                <div className="flex items-center gap-1.5">
+                                    <Calendar size={14} />
+                                    {formattedDate}
+                                </div>
+                                <div className="flex items-center gap-1.5">
+                                    <Target size={14} />
+                                    <span className={recommendationColor}>{prediction.recommendation}</span>
+                                </div>
+                                {prediction.divergence > 0.1 && (
+                                    <div className="flex items-center gap-1.5 text-amber-400">
+                                        <TrendingUp size={14} />
+                                        {(prediction.divergence * 100).toFixed(1)}% Edge
+                                    </div>
+                                )}
                             </div>
                         </div>
-                        
-                        {/* Key Metrics Row */}
-                        <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
-                            <div className="rounded-2xl border border-zinc-800 bg-zinc-900/40 p-3">
-                                <div className="text-[10px] uppercase tracking-widest text-zinc-500 flex items-center gap-1 mb-1">
-                                    <Calendar size={11} /> Schedule
-                                </div>
-                                <div className="text-sm font-semibold text-white">{formattedDate}</div>
-                            </div>
-                            <div className="rounded-2xl border border-zinc-800 bg-zinc-900/40 p-3">
-                                <div className="text-[10px] uppercase tracking-widest text-zinc-500 flex items-center gap-1 mb-1">
-                                    <Brain size={11} /> Divergence
-                                </div>
-                                <div className="text-sm font-semibold text-white">{divergence}%</div>
-                            </div>
-                            <div className="rounded-2xl border border-zinc-800 bg-zinc-900/40 p-3">
-                                <div className="text-[10px] uppercase tracking-widest text-zinc-500 flex items-center gap-1 mb-1">
-                                    <DollarSign size={11} /> Dislocation
-                                </div>
-                                <div className={cn("text-sm font-semibold", Number(dislocation) >= 0 ? "text-emerald-300" : "text-amber-300")}>
-                                    {Number(dislocation) >= 0 ? '+' : ''}{dislocation}%
-                                </div>
-                            </div>
-                            <div className="rounded-2xl border border-zinc-800 bg-zinc-900/40 p-3">
-                                <div className="text-[10px] uppercase tracking-widest text-zinc-500 flex items-center gap-1 mb-1">
-                                    <Gauge size={11} /> Signal
-                                </div>
-                                <div className="text-sm font-semibold text-white">{prediction.signal_strength}</div>
-                            </div>
-                        </div>
-
-                        {/* Tabs */}
-                        <div className="flex items-center gap-6 border-b border-zinc-800 mt-4">
-                            {['overview', 'insights', 'context', 'charts'].map((tab) => (
-                                <button
-                                    key={tab}
-                                    onClick={() => setActiveTab(tab as any)}
-                                    className={cn(
-                                        "pb-3 text-xs font-medium uppercase tracking-widest transition-colors relative",
-                                        activeTab === tab ? "text-emerald-400" : "text-zinc-500 hover:text-zinc-300"
-                                    )}
-                                >
-                                    {tab}
-                                    {activeTab === tab && (
-                                        <motion.div 
-                                            layoutId="activeTab"
-                                            className="absolute bottom-0 left-0 right-0 h-0.5 bg-emerald-400"
-                                        />
-                                    )}
-                                </button>
-                            ))}
-                        </div>
+                        <button
+                            onClick={onClose}
+                            className="p-2 hover:bg-zinc-800 rounded-lg transition-colors text-zinc-400 hover:text-white"
+                        >
+                            <X size={20} />
+                        </button>
                     </div>
 
-                    <div className="flex-1 p-5 md:p-6 overflow-y-auto relative">
-                        {loading ? (
-                            <div className="absolute inset-0 bg-zinc-900/80 backdrop-blur-sm flex items-center justify-center z-10">
-                                <div className="flex flex-col items-center gap-3">
-                                    <div className="w-8 h-8 border-2 border-zinc-600 border-t-emerald-400 rounded-full animate-spin" />
-                                    <div className="text-sm text-zinc-400">Updating data...</div>
-                                </div>
-                            </div>
-                        ) : null}
-                        {activeTab === 'overview' && renderOverview()}
-                        {activeTab === 'insights' && renderInsights()}
-                        {activeTab === 'context' && renderContext()}
-                        {activeTab === 'charts' && renderCharts()}
-                    </div>
-
-                    {/* Footer */}
-                    <div className="p-4 border-t border-zinc-800 flex flex-wrap items-center justify-between gap-3 text-[11px] text-zinc-500 flex-shrink-0">
-                        <div className="flex items-center gap-2">
-                            <div className={cn("w-2 h-2 rounded-full", prediction.confidence_score === 'HIGH' ? "bg-primary" : prediction.confidence_score === 'MEDIUM' ? "bg-amber-400" : "bg-zinc-600")} />
-                            {prediction.confidence_score} confidence
-                        </div>
-                        <div className="flex items-center gap-2">
-                            <span>Volatility:</span>
-                            <span className="text-white font-semibold">{prediction.volatility}</span>
-                        </div>
-                        <div className="flex items-center gap-2">
-                            <span>Volume:</span>
-                            <span className="text-white font-semibold">{formatDollars(market_data.volume)}</span>
-                        </div>
+                    {/* Navigation Tabs */}
+                    <div className="flex gap-1 overflow-x-auto pb-2 scrollbar-hide">
+                        {[
+                            { id: 'overview', label: 'Overview', icon: Activity },
+                            { id: 'market', label: 'Market Analysis', icon: DollarSign },
+                            { id: 'insights', label: 'AI Insights', icon: Brain },
+                            { id: 'charts', label: 'Charts', icon: BarChart3 },
+                            { id: 'context', label: 'Context', icon: Newspaper },
+                        ].map((tab) => (
+                            <button
+                                key={tab.id}
+                                onClick={() => setActiveTab(tab.id as any)}
+                                className={cn(
+                                    "flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all whitespace-nowrap",
+                                    activeTab === tab.id
+                                        ? "bg-white text-black shadow-lg shadow-white/10"
+                                        : "text-zinc-400 hover:text-white hover:bg-zinc-800"
+                                )}
+                            >
+                                <tab.icon size={16} />
+                                {tab.label}
+                            </button>
+                        ))}
                     </div>
                 </div>
 
+                {/* Content Area */}
+                <div className="flex-1 overflow-y-auto p-6 scrollbar-thin scrollbar-thumb-zinc-800 scrollbar-track-transparent">
+                    {activeTab === 'overview' && renderOverview()}
+                    {activeTab === 'market' && <MarketAnalysisPanel game={game} />}
+                    {activeTab === 'insights' && renderInsights()}
+                    {activeTab === 'charts' && renderCharts()}
+                    {activeTab === 'context' && renderContext()}
+                </div>
             </motion.div>
         </motion.div>
     );

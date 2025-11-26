@@ -7,4 +7,6 @@ python-dotenv
 httpx
 pytest
 cryptography
-google-generativeai
+
+feedparser
+textblob

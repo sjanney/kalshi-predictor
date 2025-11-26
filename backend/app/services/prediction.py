@@ -6,7 +6,7 @@ Maintained for backward compatibility.
 from typing import Dict, List, Optional
 import pandas as pd
 from datetime import datetime
-from app.services.signals import SignalEngine
+from app.services.enhanced_signals import EnhancedSignalEngine
 from app.services.data_feeds import DataFeeds
 
 class PredictionEngine:
@@ -19,7 +19,7 @@ class PredictionEngine:
         # Home court advantage (approx 3-4 points or 5-10% win prob boost)
         self.HOME_ADVANTAGE_ELO = 100
         
-        self.signal_engine = SignalEngine()
+        self.signal_engine = EnhancedSignalEngine()
         self.data_feeds = DataFeeds()
         
     def calculate_elo_win_prob(self, home_elo: float, away_elo: float) -> float:

@@ -27,9 +27,15 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+from app.startup import run_startup_tasks
+
+# Import API routers
 from app.api.endpoints import router as api_router
 from app.api.enhanced_endpoints import router as enhanced_router
 from app.api.training_endpoints import router as training_router
+
+# Run startup tasks (initialize Elo ratings, etc.)
+run_startup_tasks()
 
 app.include_router(api_router, prefix="/api")
 app.include_router(enhanced_router, prefix="/api")

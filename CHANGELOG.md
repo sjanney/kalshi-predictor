@@ -24,3 +24,4 @@ All notable changes to this project will be documented in this file.
 - Added Signal Engine and Insights Generator.
 - Integrated Kalshi market data.
 
+

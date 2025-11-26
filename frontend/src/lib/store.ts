@@ -54,9 +54,12 @@ export const useSyncStore = create<SyncState>((set) => ({
 // Validation helper
 const validateContext = (context: any): boolean => {
     if (!context || typeof context !== 'object') return false;
-    if (!context.weather || typeof context.weather !== 'object') return false;
+    // Weather is optional, but if present, must be an object
+    if (context.weather !== undefined && typeof context.weather !== 'object') return false;
+    // Injuries is required and must be an object
     if (!context.injuries || typeof context.injuries !== 'object') return false;
-    // Optional: check for specific fields if critical
+    // News is required and must be an array
+    if (!Array.isArray(context.news)) return false;
     return true;
 };
 
@@ -71,21 +74,30 @@ export const useDataStore = create<DataState>((set, get) => ({
     marketContexts: {},
     setMarketContext: (gameId, context, lastModified) => {
         if (!validateContext(context)) {
-            console.error("Invalid context data structure", context);
+            console.error("[Store] Invalid context data structure for", gameId, {
+                hasContext: !!context,
+                contextType: typeof context,
+                hasWeather: context?.weather !== undefined,
+                weatherType: typeof context?.weather,
+                hasInjuries: !!context?.injuries,
+                injuriesType: typeof context?.injuries,
+                hasNews: Array.isArray(context?.news),
+                newsType: typeof context?.news
+            });
             return;
         }
-        
+
         set((state) => {
             const existing = state.marketContexts[gameId];
-            
+
             // Check if existing data is newer based on lastModified from server (if available)
             if (existing?.lastModified && lastModified) {
-                 const existingTime = new Date(existing.lastModified).getTime();
-                 const newTime = new Date(lastModified).getTime();
-                 if (existingTime > newTime) {
-                     console.warn(`Ignoring stale update for ${gameId}. Existing: ${existing.lastModified}, New: ${lastModified}`);
-                     return state;
-                 }
+                const existingTime = new Date(existing.lastModified).getTime();
+                const newTime = new Date(lastModified).getTime();
+                if (existingTime > newTime) {
+                    console.warn(`Ignoring stale update for ${gameId}. Existing: ${existing.lastModified}, New: ${lastModified}`);
+                    return state;
+                }
             }
 
             return {
@@ -116,8 +128,8 @@ export const useDataStore = create<DataState>((set, get) => ({
         const record = get().marketContexts[gameId];
         // Return data if it exists and isn't older than 5 minutes
         if (record && !record.stale && (Date.now() - record.timestamp < 5 * 60 * 1000)) {
-            return { 
-                data: record.data, 
+            return {
+                data: record.data,
                 timestamp: record.timestamp,
                 lastModified: record.lastModified
             };

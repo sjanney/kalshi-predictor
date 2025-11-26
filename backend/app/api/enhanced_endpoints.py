@@ -13,6 +13,7 @@ from app.services.enhanced_signals import EnhancedSignalEngine
 from app.services.accuracy_tracker import AccuracyTracker
 from app.api.endpoints import match_game_to_markets
 import re
+import os
 
 router = APIRouter()
 
@@ -201,3 +202,4 @@ async def run_backtest(
     
     result = accuracy_tracker.backtest_strategy(strategy, start, end)
     return result
+

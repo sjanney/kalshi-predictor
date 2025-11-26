@@ -13,8 +13,15 @@ class AccuracyTracker:
     Tracks prediction accuracy and provides backtesting capabilities.
     """
     
-    def __init__(self, storage_path: str = "data/predictions_history.json"):
-        self.storage_path = storage_path
+    def __init__(self, storage_path: str = None):
+        if storage_path is None:
+            # Default to backend/data/predictions_history.json
+            base_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+            self.storage_path = os.path.join(base_dir, "data", "predictions_history.json")
+        else:
+            self.storage_path = storage_path
+            
+        print(f"DEBUG: AccuracyTracker initialized. Path: {self.storage_path}")
         self.predictions_history: List[Dict] = []
         self.load_history()
     
@@ -27,6 +34,8 @@ class AccuracyTracker:
             except Exception as e:
                 print(f"Error loading prediction history: {e}")
                 self.predictions_history = []
+        else:
+            print(f"DEBUG: Storage path does not exist: {self.storage_path}")
     
     def save_history(self):
         """Save prediction history to storage"""
@@ -73,6 +82,9 @@ class AccuracyTracker:
     
     def calculate_accuracy_metrics(self, days_back: int = 30) -> Dict:
         """Calculate accuracy metrics for recent predictions"""
+        # Reload history to ensure we have the latest data
+        self.load_history()
+        
         cutoff_date = datetime.now() - timedelta(days=days_back)
         
         verified = [
@@ -80,6 +92,17 @@ class AccuracyTracker:
             if r.get("verified") and r.get("outcome") and
             datetime.fromisoformat(r["timestamp"].replace("Z", "")) >= cutoff_date
         ]
+        
+        print(f"DEBUG: Total history: {len(self.predictions_history)}")
+        print(f"DEBUG: Verified count: {len(verified)}")
+        if len(self.predictions_history) > 0:
+            r = self.predictions_history[0]
+            print(f"DEBUG: Sample record: verified={r.get('verified')}, outcome={r.get('outcome') is not None}, timestamp={r.get('timestamp')}")
+            try:
+                ts = datetime.fromisoformat(r["timestamp"].replace("Z", ""))
+                print(f"DEBUG: Parsed timestamp: {ts}, Cutoff: {cutoff_date}")
+            except Exception as e:
+                print(f"DEBUG: Timestamp parse error: {e}")
         
         if not verified:
             return {
@@ -263,4 +286,5 @@ class AccuracyTracker:
             "win_rate": sum(1 for t in trades if t["pnl"] > 0) / len(trades) if trades else 0.0,
             "trades": trades
         }
+
 

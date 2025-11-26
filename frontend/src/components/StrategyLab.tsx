@@ -357,3 +357,4 @@ const StrategyLab: React.FC<StrategyLabProps> = ({ open, onClose, games }) => {
 
 export default StrategyLab;
 
+

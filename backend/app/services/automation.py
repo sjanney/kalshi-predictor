@@ -90,3 +90,4 @@ class AutomationService:
 
         return league_alerts
 
+

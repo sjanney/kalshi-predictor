@@ -239,16 +239,36 @@ class KalshiClient:
 
     def get_market_details(self, market: Dict) -> Dict:
         """Extract rich market details for the UI"""
+        yes_bid = market.get("yes_bid", 0)
+        yes_ask = market.get("yes_ask", 0)
+        last_price = market.get("last_price", 0)
+        
+        # Calculate spread metrics
+        spread = yes_ask - yes_bid
+        mid_price = (yes_bid + yes_ask) / 2 if yes_bid and yes_ask else last_price
+        spread_pct = (spread / mid_price * 100) if mid_price > 0 else 0
+        
+        # Calculate 24h change if previous price available
+        prev_price = market.get("previous_price")  # May not always be available
+        price_change_24h = ((last_price - prev_price) / prev_price * 100) if prev_price and prev_price > 0 else 0
+        
         return {
             "market_id": market.get("ticker"),
             "title": market.get("title"),
-            "yes_bid": market.get("yes_bid", 0),
-            "yes_ask": market.get("yes_ask", 0),
-            "last_price": market.get("last_price", 0),
+            "subtitle": market.get("subtitle"),
+            "yes_bid": yes_bid,
+            "yes_ask": yes_ask,
+            "last_price": last_price,
+            "mid_price": round(mid_price, 2),
+            "spread": spread,
+            "spread_pct": round(spread_pct, 2),
             "volume": market.get("volume_24h", 0),
             "open_interest": market.get("open_interest", 0),
             "liquidity": market.get("liquidity", 0),
-            "close_date": market.get("close_date")
+            "close_date": market.get("close_date"),
+            "last_traded": market.get("last_trade_time"),
+            "price_change_24h": round(price_change_24h, 2),
+            "status": market.get("status", "unknown")
         }
 
     def assess_market_confidence(self, market: Dict) -> str:
