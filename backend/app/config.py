@@ -22,7 +22,8 @@ class Settings:
         self.KALSHI_API_BASE_URL = os.getenv("KALSHI_API_BASE_URL", "https://api.elections.kalshi.com")
         self.KALSHI_API_KEY_ID = os.getenv("KALSHI_API_KEY_ID", "0b3ab9ef-d8e0-4b83-8f1e-8cd84f33a89b")
         self.KALSHI_PRIVATE_KEY_PATH = os.getenv("KALSHI_PRIVATE_KEY_PATH", "prediction_api_key.txt")
-        self.GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
+        self.KALSHI_API_KEY = os.getenv("KALSHI_API_KEY", "")
+        self.USE_MOCK_DATA = os.getenv("USE_MOCK_DATA", "false").lower() == "true"
         
         # App metadata
         self.PROJECT_NAME = "Kalshi Predictor API"

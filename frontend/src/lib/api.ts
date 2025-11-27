@@ -34,6 +34,8 @@ export interface Analytics {
         home_advantage: number;
         record_diff: number;
         recent_form: number;
+        elo_advantage: number;
+        injury_impact: number;
     };
     reasoning?: string[];
     insights?: Insight[];
@@ -72,6 +74,14 @@ export interface Analytics {
         form: number;
         stat_ensemble: number; // Replaces ml
     };
+    context_factors?: {
+        home_rest_days: number;
+        away_rest_days: number;
+        travel_distance_km: number;
+        time_zone_shift: number;
+        home_is_b2b: boolean;
+        away_is_b2b: boolean;
+    };
 }
 
 export interface MarketData {
@@ -85,6 +95,7 @@ export interface MarketData {
     open_interest?: number;
     liquidity?: number;
     confidence?: "HIGH" | "MEDIUM" | "LOW";
+    daily_change?: number;
 }
 
 export interface GameFactors {
@@ -442,6 +453,58 @@ export const api = {
             throw new Error('Failed to fetch game accuracy');
         }
         return response.json();
+    },
+
+    // Game result monitoring endpoints
+    triggerAutoRecord: async (): Promise<AutoRecordResult> => {
+        const response = await fetch(`${API_BASE}/results/auto-record`, {
+            method: 'POST',
+        });
+        if (!response.ok) {
+            throw new Error('Failed to trigger auto-record');
+        }
+        return response.json();
+    },
+
+    // Model calibration endpoints
+    getCalibrationStatus: async (options?: { signal?: AbortSignal }): Promise<CalibrationStatus> => {
+        const response = await fetch(`${API_BASE}/calibration/status`, {
+            signal: options?.signal,
+        });
+        if (!response.ok) {
+            throw new Error('Failed to fetch calibration status');
+        }
+        return response.json();
+    },
+
+    runCalibration: async (minPredictions: number = 50, maxAdjustment: number = 0.05): Promise<CalibrationResult> => {
+        const response = await fetch(`${API_BASE}/calibration/run?min_predictions=${minPredictions}&max_adjustment=${maxAdjustment}`, {
+            method: 'POST',
+        });
+        if (!response.ok) {
+            throw new Error('Failed to run calibration');
+        }
+        return response.json();
+    },
+
+    getCalibrationReport: async (options?: { signal?: AbortSignal }): Promise<CalibrationReport> => {
+        const response = await fetch(`${API_BASE}/calibration/report`, {
+            signal: options?.signal,
+        });
+        if (!response.ok) {
+            throw new Error('Failed to fetch calibration report');
+        }
+        return response.json();
+    },
+
+    getMonitorStatus: async (options?: { signal?: AbortSignal }): Promise<MonitorStatus> => {
+        const response = await fetch(`${API_BASE}/monitor/status`, {
+            signal: options?.signal,
+        });
+        if (!response.ok) {
+            throw new Error('Failed to fetch monitor status');
+        }
+        return response.json();
     }
 };
 
@@ -469,4 +532,64 @@ export interface GameAccuracy {
     error?: number;
     correct?: boolean;
     brier_score?: number;
+}
+
+// Game result monitoring types
+export interface AutoRecordResult {
+    status: string;
+    results: {
+        nba: string[];
+        nfl: string[];
+        total_processed: number;
+    };
+}
+
+export interface MonitorStatus {
+    running: boolean;
+    check_interval: number;
+    processed_games_count: number;
+    last_check: string | null;
+}
+
+// Model calibration types
+export interface CalibrationStatus {
+    calibrated: boolean;
+    last_calibrated: string | null;
+    current_weights: Record<string, number>;
+    calibration_count: number;
+    component_accuracy: Record<string, {
+        accuracy: number;
+        brier_score: number;
+        count: number;
+    }>;
+}
+
+export interface CalibrationResult {
+    success: boolean;
+    message: string;
+    weights_before?: Record<string, number>;
+    weights_after?: Record<string, number>;
+    weight_changes?: Record<string, number>;
+    accuracy_before?: number;
+    predictions_analyzed?: number;
+    component_accuracy?: Record<string, {
+        accuracy: number;
+        brier_score: number;
+        count: number;
+    }>;
+}
+
+export interface CalibrationReport {
+    status: CalibrationStatus;
+    current_accuracy: number;
+    total_predictions: number;
+    brier_score: number;
+    calibration_history: Array<{
+        timestamp: string;
+        predictions_analyzed: number;
+        accuracy_before?: number;
+        weight_changes: Record<string, number>;
+        component_accuracy?: Record<string, any>;
+    }>;
+    recommendations: string[];
 }

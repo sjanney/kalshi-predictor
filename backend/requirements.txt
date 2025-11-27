@@ -3,6 +3,7 @@ uvicorn
 requests
 pandas
 scikit-learn
+scipy
 python-dotenv
 httpx
 pytest
@@ -10,3 +11,6 @@ cryptography
 
 feedparser
 textblob
+websockets>=12.0
+aiohttp>=3.9.0
+sse-starlette>=3.0.0

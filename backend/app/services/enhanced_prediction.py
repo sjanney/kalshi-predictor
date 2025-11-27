@@ -40,11 +40,15 @@ class EnhancedPredictionEngine:
         
         # Weights for the stat_model_prob itself (what users see as 'Model')
         # This is the core statistical prediction before market blending
+        # These will be loaded from calibration file if available
         self.STAT_ELO_WEIGHT = 0.40      # Elo is the strongest predictor
         self.STAT_FORM_WEIGHT = 0.20     # Recent form is highly predictive
         self.STAT_RECORD_WEIGHT = 0.15   # Season record provides context
         self.STAT_H2H_WEIGHT = 0.10      # Head-to-head adds edge
         self.STAT_INJURY_WEIGHT = 0.15   # Injury impact
+        
+        # Load optimized weights if available
+        self._load_optimized_weights()
         
         # Recent form window
         self.FORM_WINDOW = 5  # Last 5 games
@@ -57,7 +61,9 @@ class EnhancedPredictionEngine:
             'record_diff': 0.4,      # Season record difference
             'h2h': 0.2,              # Head-to-head adjustment
             'home_advantage': 0.05,  # Base home advantage
-            'market_calibration': 0.3  # Market confidence adjustment
+            'market_calibration': 0.3,  # Market confidence adjustment
+            'rest_penalty': 0.03,    # Penalty for back-to-back/short rest
+            'travel_penalty': 0.02   # Penalty for long travel/time zones
         }
         
         self.signal_engine = EnhancedSignalEngine()
@@ -239,6 +245,174 @@ class EnhancedPredictionEngine:
         except:
             pass
         return 0, 0
+    
+    def calculate_rest_days(self, team_id: str, current_date: datetime, all_games: List[Dict]) -> int:
+        """Calculate days of rest before the current game"""
+        # Filter games for this team
+        team_games = [
+            g for g in all_games 
+            if (str(g.get('home_team_id')) == str(team_id) or str(g.get('away_team_id')) == str(team_id))
+            and g.get('status') == 'Final'
+        ]
+        
+        # Sort by date descending
+        team_games.sort(key=lambda x: x.get('game_date', ''), reverse=True)
+        
+        # Find last game before current_date
+        last_game_date = None
+        for g in team_games:
+            g_date_str = g.get('game_date')
+            if not g_date_str:
+                continue
+            try:
+                g_date = datetime.fromisoformat(g_date_str.replace("Z", ""))
+                if g_date < current_date:
+                    last_game_date = g_date
+                    break
+            except:
+                continue
+                
+        if not last_game_date:
+            return 7  # Assume well rested if no history
+            
+        delta = current_date - last_game_date
+        return delta.days
+
+    def calculate_travel_impact(self, home_abbr: str, away_abbr: str, game_date: datetime, league: str) -> Dict:
+        """
+        Calculate travel impact based on distance and time zones.
+        Returns a probability adjustment (negative means away team is disadvantaged).
+        """
+        if not home_abbr or not away_abbr:
+            return {"impact": 0.0, "description": "", "distance_km": 0, "time_zone_shift": 0}
+            
+        locations = self.data_feeds.team_locations
+        
+        # Normalize abbreviations
+        home_norm = self.data_feeds._normalize_team_name(home_abbr, league)
+        away_norm = self.data_feeds._normalize_team_name(away_abbr, league)
+        
+        home_loc = locations.get(home_norm)
+        away_loc = locations.get(away_norm)
+        
+        if not home_loc or not away_loc:
+            return {"impact": 0.0, "description": "", "distance_km": 0, "time_zone_shift": 0}
+            
+        # Calculate distance (Haversine)
+        import math
+        R = 6371  # Earth radius in km
+        dlat = math.radians(away_loc['lat'] - home_loc['lat'])
+        dlon = math.radians(away_loc['lon'] - home_loc['lon'])
+        a = math.sin(dlat/2) * math.sin(dlat/2) + \
+            math.cos(math.radians(home_loc['lat'])) * math.cos(math.radians(away_loc['lat'])) * \
+            math.sin(dlon/2) * math.sin(dlon/2)
+        c = 2 * math.atan2(math.sqrt(a), math.sqrt(1-a))
+        distance_km = R * c
+        
+        # Calculate time zone diff (approximate)
+        # 15 degrees longitude = 1 hour
+        tz_diff = (away_loc['lon'] - home_loc['lon']) / 15.0
+        
+        impact = 0.0
+        reasons = []
+        
+        # Distance penalty
+        if distance_km > 3000: # Cross country
+            impact -= 0.02
+            reasons.append(f"Long travel ({int(distance_km)}km)")
+        elif distance_km > 1500:
+            impact -= 0.01
+            
+        # Time zone penalty (Body clock)
+        # If West coast team plays early on East coast
+        # Game time is usually evening, but let's check for large shifts
+        if abs(tz_diff) >= 2.5:
+            impact -= 0.015
+            reasons.append(f"Time zone shift ({int(abs(tz_diff))}h)")
+            
+        # Specific check for "West Coast team playing early East Coast game"
+        # Assuming game_date has time. If it's before 2 PM ET (19:00 UTC approx) and away is West
+        # This is a bit complex without precise game time, so we'll stick to general TZ shift
+        
+        return {
+            "impact": impact,
+            "description": ", ".join(reasons) if reasons else "Normal travel",
+            "distance_km": int(distance_km),
+            "time_zone_shift": round(tz_diff, 1)
+        }
+    
+    def _load_optimized_weights(self):
+        """Load calibrated weights from disk if available."""
+        import json
+        import logging
+        
+        logger = logging.getLogger(__name__)
+        weights_file = os.path.join("data", "model_weights.json")
+        
+        if os.path.exists(weights_file):
+            try:
+                with open(weights_file, 'r') as f:
+                    data = json.load(f)
+                    weights = data.get('current_weights', {})
+                    
+                    # Update weights if they exist
+                    if weights:
+                        self.STAT_ELO_WEIGHT = weights.get('STAT_ELO_WEIGHT', self.STAT_ELO_WEIGHT)
+                        self.STAT_FORM_WEIGHT = weights.get('STAT_FORM_WEIGHT', self.STAT_FORM_WEIGHT)
+                        self.STAT_RECORD_WEIGHT = weights.get('STAT_RECORD_WEIGHT', self.STAT_RECORD_WEIGHT)
+                        self.STAT_H2H_WEIGHT = weights.get('STAT_H2H_WEIGHT', self.STAT_H2H_WEIGHT)
+                        self.STAT_INJURY_WEIGHT = weights.get('STAT_INJURY_WEIGHT', self.STAT_INJURY_WEIGHT)
+                        
+                        logger.info(f"Loaded calibrated weights from {weights_file}")
+            except Exception as e:
+                logger.warning(f"Could not load calibrated weights: {e}")
+    
+    def apply_weight_adjustments(self, adjustments: Dict[str, float]):
+        """
+        Apply weight adjustments from calibration.
+        
+        Args:
+            adjustments: Dictionary of weight adjustments
+        """
+        for key, value in adjustments.items():
+            if hasattr(self, key):
+                setattr(self, key, value)
+    
+    def save_current_weights(self):
+        """Save current weights to disk."""
+        import json
+        import logging
+        
+        logger = logging.getLogger(__name__)
+        weights_file = os.path.join("data", "model_weights.json")
+        
+        weights = {
+            'STAT_ELO_WEIGHT': self.STAT_ELO_WEIGHT,
+            'STAT_FORM_WEIGHT': self.STAT_FORM_WEIGHT,
+            'STAT_RECORD_WEIGHT': self.STAT_RECORD_WEIGHT,
+            'STAT_H2H_WEIGHT': self.STAT_H2H_WEIGHT,
+            'STAT_INJURY_WEIGHT': self.STAT_INJURY_WEIGHT
+        }
+        
+        try:
+            os.makedirs("data", exist_ok=True)
+            
+            # Load existing data if available
+            if os.path.exists(weights_file):
+                with open(weights_file, 'r') as f:
+                    data = json.load(f)
+            else:
+                data = {'calibration_history': [], 'component_accuracy': {}}
+            
+            data['current_weights'] = weights
+            data['last_updated'] = datetime.now().isoformat()
+            
+            with open(weights_file, 'w') as f:
+                json.dump(data, f, indent=2)
+            
+            logger.info(f"Saved current weights to {weights_file}")
+        except Exception as e:
+            logger.error(f"Error saving weights: {e}")
     
     def extract_features(self, game: Dict, home_stats: Dict, away_stats: Dict, 
                         kalshi_markets: Optional[Dict], all_games: List[Dict]) -> np.ndarray:
@@ -456,6 +630,38 @@ class EnhancedPredictionEngine:
         injury_prob = 0.5 + (net_injury_impact * 0.04)
         injury_prob = max(0.20, min(0.80, injury_prob))
         
+        # 3f. Calculate Rest and Travel Factors
+        try:
+            game_dt = datetime.fromisoformat(game.get('game_date', '').replace("Z", ""))
+        except:
+            game_dt = datetime.now()
+            
+        # Rest
+        home_rest = self.calculate_rest_days(home_id, game_dt, full_games_list)
+        away_rest = self.calculate_rest_days(away_id, game_dt, full_games_list)
+        
+        rest_impact = 0.0
+        rest_desc = ""
+        
+        if league == 'nba':
+            if home_rest == 1: rest_impact -= 0.03  # Home B2B
+            if away_rest == 1: rest_impact += 0.03  # Away B2B (favors home)
+            if home_rest >= 3 and away_rest == 1: 
+                rest_impact -= 0.01 # Rest advantage bonus
+                rest_desc = "Rest Advantage"
+        elif league == 'nfl':
+            if home_rest < 6: rest_impact -= 0.02 # Short week
+            if away_rest < 6: rest_impact += 0.02
+            if home_rest > 10: rest_impact += 0.02 # Bye week
+            if away_rest > 10: rest_impact -= 0.02
+            
+        # Travel
+        travel_data = self.calculate_travel_impact(home_abbr, away_abbr, game_dt, league)
+        travel_impact = -travel_data['impact'] # Invert because impact is negative for away, which helps Home prob
+        
+        # Combine contextual factors
+        context_prob = 0.5 + rest_impact + travel_impact
+        
         # 3d. Build comprehensive stat_model_prob (what users see as 'Model')
         # This is a weighted ensemble of multiple statistical factors
         # Using research-backed weights for sports prediction
@@ -464,7 +670,8 @@ class EnhancedPredictionEngine:
             form_prob * self.STAT_FORM_WEIGHT +        # Form is very predictive (20%)
             record_prob * self.STAT_RECORD_WEIGHT +    # Season record adds context (15%)
             (0.5 + h2h_adjustment) * self.STAT_H2H_WEIGHT + # H2H historical adjustment (10%)
-            injury_prob * self.STAT_INJURY_WEIGHT      # Injury impact (15%)
+            injury_prob * self.STAT_INJURY_WEIGHT +    # Injury impact (15%)
+            (context_prob - 0.5) * 0.10                # Rest/Travel context (10% implicit weight)
         )
 
         
@@ -719,6 +926,16 @@ class EnhancedPredictionEngine:
             reasoning.append(f"Strong Elo advantage for home team (+{elo_diff:.0f}).")
         elif elo_diff < -100:
             reasoning.append(f"Strong Elo advantage for away team ({abs(elo_diff):.0f}).")
+            
+        # Context reasoning
+        if abs(rest_impact) > 0.01:
+            if rest_impact > 0:
+                reasoning.append(f"Rest advantage favors Home (Home {home_rest}d vs Away {away_rest}d).")
+            else:
+                reasoning.append(f"Rest advantage favors Away (Home {home_rest}d vs Away {away_rest}d).")
+                
+        if abs(travel_data['impact']) > 0.01:
+            reasoning.append(f"Travel impact: {travel_data['description']}.")
         
         for sig in signals:
             reasoning.append(f"{sig['type']}: {sig['description']}")
@@ -780,7 +997,15 @@ class EnhancedPredictionEngine:
                     "injury_impact": round(net_injury_impact * 0.04, 3) # Injury impact
                 },
                 "reasoning": reasoning,
-                "signals": signals
+                "signals": signals,
+                "context_factors": {
+                    "home_rest_days": home_rest,
+                    "away_rest_days": away_rest,
+                    "travel_distance_km": travel_data.get('distance_km', 0),
+                    "time_zone_shift": travel_data.get('time_zone_shift', 0),
+                    "home_is_b2b": home_rest == 0,
+                    "away_is_b2b": away_rest == 0
+                }
             },
             "factors": {
                 "home_record": home_record,
