@@ -43,7 +43,7 @@ class EnhancedDataFeeds:
     - Real injury data (ESPN API)
     - Weather correlation analysis
     - Better team location mapping
-    - Google Gemini Intelligence
+    - Free public news and sentiment APIs
     """
     
     def __init__(self):
@@ -60,13 +60,11 @@ class EnhancedDataFeeds:
         self.headers = {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
         }
-        # Cache for market context (injuries, weather, gemini analysis)
+        # Cache for market context (injuries, weather, news analysis)
         # This prevents repeated expensive API calls for the same game
         self.context_cache = SimpleCache(ttl_seconds=3600)
         
-    def _init_gemini_client(self):
-        """Deprecated: Gemini client removed in favor of free APIs"""
-        pass
+
     
     def _load_alternative_abbr_map(self) -> Dict[str, Dict[str, str]]:
         """Map ESPN's alternative abbreviations to correct team_id_map keys"""
@@ -783,7 +781,7 @@ class EnhancedDataFeeds:
         return result
     
     def _get_related_news(self, home: str, away: str) -> List[Dict]:
-        """Deprecated: Use _get_intelligence_with_gemini instead"""
+        """Deprecated: Use _get_intelligence_free instead"""
         return []
 
     def _fetch_news_rss(self, query: str) -> List[Dict]:

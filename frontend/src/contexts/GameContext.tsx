@@ -355,7 +355,7 @@ const GameContextProvider: React.FC<GameContextProviderProps> = ({ children }) =
         })
             .then((data) => {
                 if (!isActive || selectedGameRequestIdRef.current !== requestId) return;
-                // Only update if game_id matches (prevent stale updates)
+                // Update if game_id matches (prevent stale updates)
                 if (data.game_id === gameId) {
                     setSelectedGameDetails(data);
                     // Only update selectedGame if the game_id is the same (prevent loops)
@@ -424,7 +424,7 @@ const GameContextProvider: React.FC<GameContextProviderProps> = ({ children }) =
         const controller = new AbortController();
         const timeoutId = setTimeout(() => {
             controller.abort();
-        }, 30000); // 30 second timeout for context fetch (Gemini can be slow)
+        }, 30000); // 30 second timeout for context fetch
 
         try {
             const context = await api.getMarketContext(

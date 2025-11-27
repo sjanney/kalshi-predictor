@@ -14,6 +14,7 @@ from app.services.accuracy_tracker import AccuracyTracker
 from app.api.endpoints import match_game_to_markets
 import re
 import os
+from datetime import datetime, timedelta
 
 router = APIRouter()
 
@@ -24,15 +25,77 @@ prediction_engine = EnhancedPredictionEngine()
 signal_engine = EnhancedSignalEngine()
 accuracy_tracker = AccuracyTracker()
 
+from concurrent.futures import ThreadPoolExecutor
+import asyncio
+
+# Create a thread pool for parallel processing
+# 50 workers allows processing many games simultaneously
+executor = ThreadPoolExecutor(max_workers=50)
+
+def _process_single_game(game: Dict, league: str, markets: List[Dict], all_games: List[Dict]) -> Optional[Dict]:
+    """Process a single game prediction (synchronous for thread pool)."""
+    try:
+        home_stats = {}
+        away_stats = {}
+        
+        matched_markets = match_game_to_markets(game, markets)
+        
+        # Use enhanced prediction engine with all games for form/H2H
+        # This is CPU bound, so good for thread pool
+        prediction_data = prediction_engine.generate_prediction(
+            {**game, "league": league},
+            home_stats,
+            away_stats,
+            matched_markets,
+            all_games=all_games  # Pass all games for form and H2H analysis
+        )
+        
+        # Record prediction for accuracy tracking
+        accuracy_tracker.record_prediction(
+            prediction_data,
+            game.get('game_id'),
+            league
+        )
+        
+        return prediction_data
+        
+    except Exception as e:
+        print(f"Error processing game {game.get('game_id')}: {e}")
+        return None
+
+async def _fetch_past_games(league: str, days: int = 7) -> List[Dict]:
+    """Fetch games from the past 'days' to provide context (rest, form)."""
+    loop = asyncio.get_running_loop()
+    today = datetime.now()
+    tasks = []
+    
+    for i in range(1, days + 1):
+        date = (today - timedelta(days=i)).strftime("%Y%m%d")
+        if league == "nba":
+            tasks.append(loop.run_in_executor(executor, nba_client.get_scoreboard, date))
+        elif league == "nfl":
+            tasks.append(loop.run_in_executor(executor, nfl_client.get_scoreboard, date))
+            
+    results = await asyncio.gather(*tasks, return_exceptions=True)
+    
+    all_past_games = []
+    for res in results:
+        if isinstance(res, list):
+            all_past_games.extend(res)
+            
+    return all_past_games
+
 async def _get_league_predictions_enhanced(league: str) -> List[Dict]:
-    """Get predictions using enhanced engine."""
-    # 1. Fetch Games
+    """Get predictions using enhanced engine with true multithreading."""
+    loop = asyncio.get_running_loop()
+    
+    # 1. Fetch Target Games (Today/Upcoming)
     print(f"Fetching {league.upper()} games...")
     try:
         if league == "nba":
-            games = nba_client.get_scoreboard()
+            games = await loop.run_in_executor(executor, nba_client.get_scoreboard)
         elif league == "nfl":
-            games = nfl_client.get_scoreboard()
+            games = await loop.run_in_executor(executor, nfl_client.get_scoreboard)
         else:
             games = []
     except Exception as e:
@@ -41,49 +104,47 @@ async def _get_league_predictions_enhanced(league: str) -> List[Dict]:
 
     if not games:
         return []
+        
+    # 1.5 Fetch Past Games for Context
+    print(f"Fetching past {league.upper()} games for context...")
+    past_games = await _fetch_past_games(league, days=10) # 10 days to be safe for rest calc
+    all_games = games + past_games
     
     # 2. Fetch Kalshi Markets
     print(f"Fetching Kalshi {league.upper()} markets...")
     try:
-        markets = kalshi_client.get_league_markets(league)
+        # Run I/O bound fetch in thread pool
+        markets = await loop.run_in_executor(executor, kalshi_client.get_league_markets, league)
         
         if not markets:
-            markets = kalshi_client.generate_synthetic_markets_for_games(games)
+            markets = await loop.run_in_executor(executor, kalshi_client.generate_synthetic_markets_for_games, games)
     except Exception as e:
         print(f"Error fetching markets: {e}")
         markets = []
     
-    # 3. Match Games to Markets and Generate Predictions
-    results = []
-    for game in games:
-        try:
-            home_stats = {}
-            away_stats = {}
-            
-            matched_markets = match_game_to_markets(game, markets)
-            
-            # Use enhanced prediction engine with all games for form/H2H
-            prediction_data = prediction_engine.generate_prediction(
-                {**game, "league": league},
-                home_stats,
-                away_stats,
-                matched_markets,
-                all_games=games  # Pass all games for form and H2H analysis
-            )
-            
-            # Record prediction for accuracy tracking
-            accuracy_tracker.record_prediction(
-                prediction_data,
-                game.get('game_id'),
-                league
-            )
-            
-            results.append(prediction_data)
-            
-        except Exception as e:
-            print(f"Error processing game {game.get('game_id')}: {e}")
-            continue
+    # 3. Generate Predictions with True Parallelism
+    print(f"Generating predictions for {len(games)} games using {executor._max_workers} threads...")
     
+    # Create futures for all games to run in the thread pool
+    futures = [
+        loop.run_in_executor(
+            executor, 
+            _process_single_game, 
+            game, 
+            league, 
+            markets, 
+            all_games # Pass combined history
+        )
+        for game in games
+    ]
+    
+    # Wait for all threads to complete
+    results = await asyncio.gather(*futures)
+    
+    # Filter out None results (failed predictions)
+    results = [r for r in results if r is not None]
+    
+    print(f"Successfully generated {len(results)} predictions")
     return results
 
 @router.get("/enhanced/games", response_model=List[Dict])
@@ -202,4 +263,87 @@ async def run_backtest(
     
     result = accuracy_tracker.backtest_strategy(strategy, start, end)
     return result
+
+
+# Initialize calibration and monitor services (will be done in startup.py)
+model_calibration = None
+game_monitor = None
+
+def init_services(calibration_service, monitor_service):
+    """Initialize calibration and monitor services."""
+    global model_calibration, game_monitor
+    model_calibration = calibration_service
+    game_monitor = monitor_service
+
+
+@router.post("/results/auto-record")
+async def auto_record_results():
+    """
+    Manually trigger automatic recording of completed game results.
+    """
+    if game_monitor is None:
+        raise HTTPException(status_code=503, detail="Game monitor not initialized")
+    
+    results = game_monitor.manual_check()
+    return {
+        "status": "complete",
+        "results": results
+    }
+
+
+@router.get("/calibration/status")
+async def get_calibration_status():
+    """Get current model calibration status."""
+    if model_calibration is None:
+        raise HTTPException(status_code=503, detail="Calibration service not initialized")
+    
+    status = model_calibration.get_calibration_status()
+    return status
+
+
+@router.post("/calibration/run")
+async def run_calibration(
+    min_predictions: int = Query(50, ge=10, le=500),
+    max_adjustment: float = Query(0.05, ge=0.01, le=0.15)
+):
+    """
+    Run model calibration to optimize ensemble weights.
+    
+    Args:
+        min_predictions: Minimum verified predictions needed (default 50)
+        max_adjustment: Maximum weight change per calibration (default 0.05)
+    """
+    if model_calibration is None:
+        raise HTTPException(status_code=503, detail="Calibration service not initialized")
+    
+    result = model_calibration.calibrate_weights(
+        min_predictions=min_predictions,
+        max_adjustment=max_adjustment
+    )
+    
+    # If calibration succeeded, reload weights in prediction engine
+    if result.get('success'):
+        prediction_engine._load_optimized_weights()
+    
+    return result
+
+
+@router.get("/calibration/report")
+async def get_calibration_report():
+    """Get detailed calibration report."""
+    if model_calibration is None:
+        raise HTTPException(status_code=503, detail="Calibration service not initialized")
+    
+    report = model_calibration.generate_calibration_report()
+    return report
+
+
+@router.get("/monitor/status")
+async def get_monitor_status():
+    """Get game result monitor status."""
+    if game_monitor is None:
+        raise HTTPException(status_code=503, detail="Game monitor not initialized")
+    
+    status = game_monitor.get_status()
+    return status
 

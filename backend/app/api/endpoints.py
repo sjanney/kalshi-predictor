@@ -13,6 +13,7 @@ from app.services.automation import AutomationService
 import re
 import time
 import asyncio
+from concurrent.futures import ThreadPoolExecutor
 
 # Configure structured logging
 logger = logging.getLogger(__name__)
@@ -150,8 +151,12 @@ predictions_cache = SimpleCache(ttl_seconds=300)
 _pending_requests = {}
 _request_locks = {}
 
-async def _process_single_game(game: Dict, markets: List[Dict], league: str, use_enhanced: bool, all_games: List[Dict]) -> Optional[Dict]:
-    """Process a single game prediction in isolation for parallel execution."""
+# Create a thread pool for parallel processing
+# 50 workers allows processing many games simultaneously
+executor = ThreadPoolExecutor(max_workers=50)
+
+def _process_single_game(game: Dict, markets: List[Dict], league: str, use_enhanced: bool, all_games: List[Dict]) -> Optional[Dict]:
+    """Process a single game prediction in isolation (synchronous for thread pool)."""
     game_id = game.get('game_id', 'unknown')
     try:
         home_stats = {} 
@@ -160,10 +165,9 @@ async def _process_single_game(game: Dict, markets: List[Dict], league: str, use
         matched_markets = match_game_to_markets(game, markets)
         
         # Process game even if no markets found - prediction engine will use defaults
-        # This ensures we still get model predictions even when Kalshi markets aren't available
         if not matched_markets:
             logger.debug(f"No matching Kalshi markets found for {game_id} ({game.get('home_team_abbrev')} vs {game.get('away_team_abbrev')}), proceeding with model-only prediction")
-            matched_markets = None  # Pass None to prediction engine, which will handle it gracefully
+            matched_markets = None
             
         # Use enhanced engine if enabled
         if use_enhanced:
@@ -214,7 +218,7 @@ async def _process_single_game(game: Dict, markets: List[Dict], league: str, use
         return None
 
 async def _get_league_predictions(league: str, use_enhanced: bool = True) -> List[Dict]:
-    """Helper to get predictions for a specific league."""
+    """Helper to get predictions for a specific league with true multithreading."""
     
     # Check cache
     cache_key = f"{league}_{use_enhanced}"
@@ -223,13 +227,12 @@ async def _get_league_predictions(league: str, use_enhanced: bool = True) -> Lis
         logger.info(f"Returning cached predictions for {league}")
         return cached
 
-    # Request deduplication - if same request is in progress, wait for it
+    # Request deduplication
     if cache_key in _pending_requests:
         logger.info(f"Request for {cache_key} already in progress, waiting...")
         return await _pending_requests[cache_key]
 
-    # Create a new future for this request
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     future = loop.create_future()
     _pending_requests[cache_key] = future
 
@@ -237,9 +240,9 @@ async def _get_league_predictions(league: str, use_enhanced: bool = True) -> Lis
     logger.info(f"Fetching {league.upper()} games...")
     try:
         if league == "nba":
-            games = await loop.run_in_executor(None, nba_client.get_scoreboard)
+            games = await loop.run_in_executor(executor, nba_client.get_scoreboard)
         elif league == "nfl":
-            games = await loop.run_in_executor(None, nfl_client.get_scoreboard)
+            games = await loop.run_in_executor(executor, nfl_client.get_scoreboard)
         else:
             games = [] 
             
@@ -254,10 +257,10 @@ async def _get_league_predictions(league: str, use_enhanced: bool = True) -> Lis
         # 2. Fetch Kalshi Markets
         logger.info(f"Fetching Kalshi {league.upper()} markets...")
         try:
-            markets = await loop.run_in_executor(None, kalshi_client.get_league_markets, league)
+            markets = await loop.run_in_executor(executor, kalshi_client.get_league_markets, league)
             logger.info(f"Markets fetched: {len(markets) if markets else 0}")
             
-            # Check if we have any valid matches (for logging purposes)
+            # Check if we have any valid matches
             has_valid_matches = False
             if games and markets:
                 # Quick check on first few games to see if we have matches
@@ -274,19 +277,28 @@ async def _get_league_predictions(league: str, use_enhanced: bool = True) -> Lis
             markets = []
         
         # 3. Match Games to Markets and Generate Predictions
-        results = []
+        logger.info(f"Generating predictions for {len(games)} games using {executor._max_workers} threads...")
         
-        # Process games in parallel with error handling
-        tasks = []
-        for game in games:
-            tasks.append(_process_single_game(game, markets, league, use_enhanced, games))
+        # Create futures for all games to run in the thread pool
+        futures = [
+            loop.run_in_executor(
+                executor,
+                _process_single_game,
+                game,
+                markets,
+                league,
+                use_enhanced,
+                games
+            )
+            for game in games
+        ]
         
-        # Wait for all tasks (return_exceptions=True to prevent one failure from stopping all)
-        if tasks:
-            processed_results = await asyncio.gather(*tasks, return_exceptions=True)
+        # Wait for all threads to complete
+        if futures:
+            processed_results = await asyncio.gather(*futures, return_exceptions=True)
             results = [r for r in processed_results if r is not None and not isinstance(r, Exception)]
             
-            # Log any exceptions that occurred
+            # Log any exceptions
             exceptions = [r for r in processed_results if isinstance(r, Exception)]
             if exceptions:
                 logger.warning(f"Encountered {len(exceptions)} exceptions during game processing")

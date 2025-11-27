@@ -3,7 +3,7 @@ import { motion } from 'framer-motion';
 import {
     X, TrendingUp, Activity, BarChart3, Brain, Target, Zap,
     Calendar, DollarSign, Cloud, Wind, Thermometer, UserMinus, AlertCircle,
-    Newspaper, Users, Sparkles
+    Newspaper, Users, Sparkles, Plane, Clock
 } from 'lucide-react';
 import {
     ResponsiveContainer, BarChart, Bar, PieChart, Pie, Cell,
@@ -22,7 +22,7 @@ interface GameAnalyticsModalProps {
     loading?: boolean;
 }
 
-const GameAnalyticsModal: React.FC<GameAnalyticsModalProps> = ({ game, onClose, loading = false }) => {
+const GameAnalyticsModal: React.FC<GameAnalyticsModalProps> = ({ game, onClose }) => {
     const { prediction, analytics, market_data } = game;
     const [activeTab, setActiveTab] = useState<'overview' | 'insights' | 'context' | 'charts' | 'market'>('overview');
     const { getMarketContext, contextLoading, contextError } = useGameContext();
@@ -89,6 +89,50 @@ const GameAnalyticsModal: React.FC<GameAnalyticsModalProps> = ({ game, onClose, 
 
     const renderOverview = () => (
         <div className="space-y-5 md:space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
+            {/* Smart Bet Recommendation - Moved to Overview for immediate value */}
+            {game?.prediction?.suggested_wager && (
+                <div className="rounded-2xl border border-indigo-500/30 bg-indigo-500/10 p-4 relative overflow-hidden">
+                    <div className="absolute top-0 right-0 p-3 opacity-10">
+                        <Sparkles size={80} />
+                    </div>
+                    <div className="relative z-10">
+                        <div className="flex items-center justify-between mb-3">
+                            <h3 className="text-xs font-bold text-indigo-400 uppercase tracking-widest flex items-center gap-1.5">
+                                <Sparkles size={12} />
+                                Smart Bet Recommendation
+                            </h3>
+                            <span className={cn(
+                                "text-[10px] px-2 py-0.5 rounded-full font-medium uppercase border",
+                                game.prediction.signal_strength === 'STRONG' ? "bg-emerald-500/20 text-emerald-400 border-emerald-500/30" :
+                                    game.prediction.signal_strength === 'MODERATE' ? "bg-amber-500/20 text-amber-400 border-amber-500/30" :
+                                        "bg-zinc-500/20 text-zinc-400 border-zinc-500/30"
+                            )}>
+                                {game.prediction.signal_strength} Confidence
+                            </span>
+                        </div>
+                        <div className="grid grid-cols-2 gap-4 mb-3">
+                            <div>
+                                <p className="text-xs text-zinc-400 mb-1 font-medium">Predicted Winner</p>
+                                <p className="text-lg font-bold text-white tracking-tight">{game.prediction.predicted_winner || 'Toss Up'}</p>
+                            </div>
+                            <div className="text-right">
+                                <p className="text-xs text-zinc-400 mb-1 font-medium">Smart Bet</p>
+                                <p className="text-lg font-bold text-emerald-400 tracking-tight">{game.prediction.recommendation}</p>
+                                <p className="text-xs font-mono text-zinc-500 mt-0.5">{game.prediction.suggested_wager}</p>
+                            </div>
+                        </div>
+                        {game.prediction.value_proposition && (
+                            <div className="mt-3 pt-3 border-t border-indigo-500/20">
+                                <p className="text-xs text-indigo-300/80 leading-relaxed">
+                                    <span className="font-semibold text-indigo-300">Why? </span>
+                                    {game.prediction.value_proposition}
+                                </p>
+                            </div>
+                        )}
+                    </div>
+                </div>
+            )}
+
             {/* Probability */}
             <div className="space-y-3">
                 <h3 className="text-xs font-bold text-zinc-400 uppercase tracking-widest flex items-center gap-1.5">
@@ -129,17 +173,17 @@ const GameAnalyticsModal: React.FC<GameAnalyticsModalProps> = ({ game, onClose, 
                 </div>
             </div>
 
-            {/* Analytics */}
+            {/* Analytics Summary */}
             {analytics && (
                 <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
                     <div className="space-y-2">
                         <h3 className="text-xs font-bold text-zinc-400 uppercase tracking-widest flex items-center gap-1.5">
                             <Zap size={12} className="text-amber-400" />
-                            Insights
+                            Key Factors
                         </h3>
                         <div className="bg-zinc-900/30 rounded-2xl border border-zinc-800/50 p-4 max-h-60 overflow-y-auto">
                             <ul className="space-y-3 text-xs text-zinc-300">
-                                {((analytics?.reasoning) ?? []).length > 0 ? (analytics?.reasoning ?? []).map((reason, idx) => (
+                                {((analytics?.reasoning) ?? []).length > 0 ? (analytics?.reasoning ?? []).slice(0, 5).map((reason, idx) => (
                                     <li key={idx} className="flex gap-2">
                                         <div className="w-1 h-1 rounded-full bg-emerald-400 mt-1.5" />
                                         <span>{reason}</span>
@@ -157,8 +201,6 @@ const GameAnalyticsModal: React.FC<GameAnalyticsModalProps> = ({ game, onClose, 
                         </h3>
                         <div className="grid grid-cols-2 gap-3">
                             {Object.entries(analytics.model_features || {}).map(([key, value]) => {
-                                // Convert normalized values (-1 to 1) to percentage impact
-                                // For display, show as percentage points contribution
                                 const displayValue = typeof value === 'number' ? value * 100 : 0;
                                 return (
                                     <div key={key} className="rounded-2xl border border-zinc-800 bg-zinc-900/40 p-3">
@@ -169,16 +211,6 @@ const GameAnalyticsModal: React.FC<GameAnalyticsModalProps> = ({ game, onClose, 
                                     </div>
                                 );
                             })}
-                        </div>
-                        <div className="rounded-2xl border border-zinc-800 bg-zinc-900/40 p-3 text-xs text-zinc-400">
-                            <div className="flex items-center justify-between">
-                                <span>Market pressure</span>
-                                <span className="text-white font-semibold">{analytics.market_pressure}</span>
-                            </div>
-                            <div className="flex items-center justify-between mt-2">
-                                <span>Volatility regime</span>
-                                <span className="text-white font-semibold">{analytics.volatility_score}</span>
-                            </div>
                         </div>
                     </div>
                 </div>
@@ -191,9 +223,9 @@ const GameAnalyticsModal: React.FC<GameAnalyticsModalProps> = ({ game, onClose, 
         const eloRatings = analytics?.elo_ratings;
         const recentForm = analytics?.recent_form;
         const headToHead = analytics?.head_to_head;
-        const modelWeights = analytics?.model_weights;
+        const contextFactors = analytics?.context_factors;
 
-        if (insights.length === 0 && !eloRatings && !recentForm) {
+        if (insights.length === 0 && !eloRatings && !recentForm && !contextFactors) {
             return (
                 <div className="flex flex-col items-center justify-center py-20 text-zinc-500 space-y-4">
                     <Brain size={48} className="text-zinc-800" />
@@ -204,83 +236,100 @@ const GameAnalyticsModal: React.FC<GameAnalyticsModalProps> = ({ game, onClose, 
 
         return (
             <div className="space-y-5 md:space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
-                {/* Smart Bet Recommendation */}
-                {game?.prediction?.suggested_wager && (
-                    <div className="rounded-2xl border border-indigo-500/30 bg-indigo-500/10 p-4 relative overflow-hidden">
-                        <div className="absolute top-0 right-0 p-3 opacity-10">
-                            <Sparkles size={80} />
+                {/* Contextual Factors (Rest & Travel) */}
+                {contextFactors && (
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        {/* Rest Analysis */}
+                        <div className="rounded-2xl border border-zinc-800 bg-zinc-900/40 p-4">
+                            <h3 className="text-xs font-bold text-zinc-400 uppercase tracking-widest mb-3 flex items-center gap-1.5">
+                                <Clock size={12} className="text-blue-400" /> Rest & Fatigue
+                            </h3>
+                            <div className="space-y-3">
+                                <div className="flex items-center justify-between">
+                                    <span className="text-sm text-zinc-400">Home ({game.home_abbr})</span>
+                                    <div className="flex items-center gap-2">
+                                        {contextFactors.home_is_b2b && (
+                                            <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-rose-500/20 text-rose-400 border border-rose-500/30">B2B</span>
+                                        )}
+                                        <span className="text-white font-mono">{contextFactors.home_rest_days} days</span>
+                                    </div>
+                                </div>
+                                <div className="flex items-center justify-between">
+                                    <span className="text-sm text-zinc-400">Away ({game.away_abbr})</span>
+                                    <div className="flex items-center gap-2">
+                                        {contextFactors.away_is_b2b && (
+                                            <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-rose-500/20 text-rose-400 border border-rose-500/30">B2B</span>
+                                        )}
+                                        <span className="text-white font-mono">{contextFactors.away_rest_days} days</span>
+                                    </div>
+                                </div>
+                            </div>
                         </div>
-                        <div className="relative z-10">
-                            <div className="flex items-center justify-between mb-3">
-                                <h3 className="text-xs font-bold text-indigo-400 uppercase tracking-widest flex items-center gap-1.5">
-                                    <Sparkles size={12} />
-                                    Smart Bet Recommendation
-                                </h3>
-                                <span className={cn(
-                                    "text-[10px] px-2 py-0.5 rounded-full font-medium uppercase border",
-                                    game.prediction.signal_strength === 'STRONG' ? "bg-emerald-500/20 text-emerald-400 border-emerald-500/30" :
-                                        game.prediction.signal_strength === 'MODERATE' ? "bg-amber-500/20 text-amber-400 border-amber-500/30" :
-                                            "bg-zinc-500/20 text-zinc-400 border-zinc-500/30"
-                                )}>
-                                    {game.prediction.signal_strength} Confidence
-                                </span>
+
+                        {/* Travel Impact */}
+                        <div className="rounded-2xl border border-zinc-800 bg-zinc-900/40 p-4">
+                            <h3 className="text-xs font-bold text-zinc-400 uppercase tracking-widest mb-3 flex items-center gap-1.5">
+                                <Plane size={12} className="text-amber-400" /> Travel Impact
+                            </h3>
+                            <div className="space-y-3">
+                                <div className="flex items-center justify-between">
+                                    <span className="text-sm text-zinc-400">Distance</span>
+                                    <span className={cn(
+                                        "font-mono",
+                                        contextFactors.travel_distance_km > 2000 ? "text-amber-400" : "text-white"
+                                    )}>
+                                        {contextFactors.travel_distance_km.toLocaleString()} km
+                                    </span>
+                                </div>
+                                <div className="flex items-center justify-between">
+                                    <span className="text-sm text-zinc-400">Time Zone Shift</span>
+                                    <span className={cn(
+                                        "font-mono",
+                                        Math.abs(contextFactors.time_zone_shift) >= 2 ? "text-rose-400" : "text-white"
+                                    )}>
+                                        {contextFactors.time_zone_shift > 0 ? '+' : ''}{contextFactors.time_zone_shift} hrs
+                                    </span>
+                                </div>
                             </div>
-                            <div className="grid grid-cols-2 gap-4 mb-3">
-                                <div>
-                                    <p className="text-xs text-zinc-400 mb-1 font-medium">Predicted Winner</p>
-                                    <p className="text-lg font-bold text-white tracking-tight">{game.prediction.predicted_winner || 'Toss Up'}</p>
-                                </div>
-                                <div className="text-right">
-                                    <p className="text-xs text-zinc-400 mb-1 font-medium">Smart Bet</p>
-                                    <p className="text-lg font-bold text-emerald-400 tracking-tight">{game.prediction.recommendation}</p>
-                                    <p className="text-xs font-mono text-zinc-500 mt-0.5">{game.prediction.suggested_wager}</p>
-                                </div>
-                            </div>
-                            {game.prediction.value_proposition && (
-                                <div className="mt-3 pt-3 border-t border-indigo-500/20">
-                                    <p className="text-xs text-indigo-300/80 leading-relaxed">
-                                        <span className="font-semibold text-indigo-300">Why? </span>
-                                        {game.prediction.value_proposition}
-                                    </p>
-                                </div>
-                            )}
                         </div>
                     </div>
                 )}
-                {/* Key Insights */}
+
+                {/* Actionable Insights - Compact Redesign */}
                 {insights.length > 0 && (
                     <div className="space-y-3">
                         <h3 className="text-xs font-bold text-zinc-400 uppercase tracking-widest flex items-center gap-1.5">
                             <Zap size={12} className="text-primary" />
-                            Actionable Insights
+                            Key Insights
                         </h3>
-                        <div className="space-y-3">
+                        <div className="grid grid-cols-1 gap-2">
                             {insights.map((insight, idx) => (
                                 <div
                                     key={idx}
                                     className={cn(
-                                        "rounded-2xl border p-4 transition-all",
-                                        insight.priority >= 8 ? "border-emerald-500/30 bg-emerald-500/5" :
-                                            insight.priority >= 6 ? "border-amber-500/30 bg-amber-500/5" :
-                                                "border-zinc-800 bg-zinc-900/40"
+                                        "rounded-lg border px-3 py-2.5 flex items-center gap-3 transition-all hover:bg-zinc-800/50",
+                                        insight.priority >= 8 ? "border-emerald-500/20 bg-emerald-500/5" :
+                                            "border-zinc-800 bg-zinc-900/20"
                                     )}
                                 >
-                                    <div className="flex items-start justify-between mb-2">
-                                        <div className="flex-1">
-                                            <div className="flex items-center gap-2 mb-1">
-                                                <span className="text-sm font-bold text-white">{insight.title}</span>
-                                                <span className={cn(
-                                                    "text-[10px] px-2 py-0.5 rounded-full font-medium",
-                                                    insight.confidence === 'HIGH' ? "bg-emerald-500/20 text-emerald-400" :
-                                                        insight.confidence === 'MEDIUM' ? "bg-amber-500/20 text-amber-400" :
-                                                            "bg-zinc-500/20 text-zinc-400"
-                                                )}>
-                                                    {insight.confidence}
+                                    <div className={cn(
+                                        "w-1 h-8 rounded-full flex-shrink-0",
+                                        insight.confidence === 'HIGH' ? "bg-emerald-500" :
+                                            insight.confidence === 'MEDIUM' ? "bg-amber-500" : "bg-zinc-500"
+                                    )} />
+                                    <div className="flex-1 min-w-0">
+                                        <div className="flex items-center gap-2 mb-0.5">
+                                            <span className="text-sm font-medium text-white truncate">{insight.title}</span>
+                                            {insight.priority >= 8 && (
+                                                <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">
+                                                    HIGH PRIORITY
                                                 </span>
-                                            </div>
-                                            <p className="text-xs text-zinc-400 mb-2">{insight.description}</p>
-                                            <p className="text-xs text-emerald-400 font-medium">→ {insight.action}</p>
+                                            )}
                                         </div>
+                                        <p className="text-xs text-zinc-400 truncate">{insight.description}</p>
+                                    </div>
+                                    <div className="text-right flex-shrink-0 pl-2 border-l border-zinc-800/50">
+                                        <span className="text-xs font-medium text-emerald-400 block">{insight.action}</span>
                                     </div>
                                 </div>
                             ))}
@@ -393,33 +442,6 @@ const GameAnalyticsModal: React.FC<GameAnalyticsModalProps> = ({ game, onClose, 
                         </div>
                     </div>
                 )}
-
-                {/* Model Weights */}
-                {modelWeights && (
-                    <div className="rounded-2xl border border-zinc-800 bg-zinc-900/40 p-4">
-                        <h3 className="text-xs font-bold text-zinc-400 uppercase tracking-widest mb-3">
-                            Model Weights
-                        </h3>
-                        <div className="space-y-2">
-                            {Object.entries(modelWeights).map(([key, value]) => (
-                                <div key={key} className="flex items-center justify-between">
-                                    <span className="text-xs text-zinc-400 capitalize">{key}</span>
-                                    <div className="flex items-center gap-2 flex-1 mx-3">
-                                        <div className="flex-1 h-2 bg-zinc-800 rounded-full overflow-hidden">
-                                            <div
-                                                style={{ width: `${value * 100}%` }}
-                                                className="h-full bg-gradient-to-r from-emerald-500 to-emerald-400"
-                                            />
-                                        </div>
-                                        <span className="text-xs text-white font-mono w-12 text-right">
-                                            {(value * 100).toFixed(0)}%
-                                        </span>
-                                    </div>
-                                </div>
-                            ))}
-                        </div>
-                    </div>
-                )}
             </div>
         );
     };
@@ -522,7 +544,7 @@ const GameAnalyticsModal: React.FC<GameAnalyticsModalProps> = ({ game, onClose, 
                     )}
                 </div>
 
-                {/* Enhanced Injury Analysis (Gemini) */}
+                {/* Enhanced Injury Analysis */}
                 {contextData.injury_analysis && (
                     <div className="rounded-2xl border border-zinc-800 bg-zinc-900/40 p-4">
                         <h3 className="text-xs font-bold text-zinc-400 uppercase tracking-widest flex items-center gap-1.5 mb-3">

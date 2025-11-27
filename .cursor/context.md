@@ -82,3 +82,5 @@ The **Kalshi Predictor** is a cross‑platform desktop application built with **
 - Expand prediction engine with richer team stats and volatility modeling
 
 
+
+

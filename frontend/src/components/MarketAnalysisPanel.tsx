@@ -1,6 +1,5 @@
-import React, { useState, useEffect } from 'react';
-import { TrendingUp, TrendingDown, DollarSign, Activity, AlertCircle, Zap } from 'lucide-react';
-import { ResponsiveContainer, XAxis, YAxis, CartesianGrid, Tooltip, AreaChart, Area } from 'recharts';
+import React from 'react';
+import { TrendingUp, TrendingDown, Zap } from 'lucide-react';
 import { cn } from './ui/shared';
 import type { Game } from '../lib/api';
 
@@ -9,36 +8,6 @@ interface MarketAnalysisPanelProps {
 }
 
 const MarketAnalysisPanel: React.FC<MarketAnalysisPanelProps> = ({ game }) => {
-    const [activeTab, setActiveTab] = useState<'overview' | 'chart' | 'trade'>('overview');
-    const [historicalData, setHistoricalData] = useState<any[]>([]);
-    const [loading, setLoading] = useState(false);
-
-    useEffect(() => {
-        if (game) {
-            // Generate mock historical data (in production, fetch from API)
-            generateMockHistoricalData();
-        }
-    }, [game]);
-
-    const generateMockHistoricalData = () => {
-        setLoading(true);
-        // Simulate API call delay
-        setTimeout(() => {
-            const basePrice = game?.market_data?.price || 50;
-            const data = Array.from({ length: 24 }, (_, i) => {
-                const hour = 24 - i;
-                const variance = (Math.random() - 0.5) * 10;
-                return {
-                    time: `${hour}h ago`,
-                    price: Math.max(0, Math.min(100, basePrice + variance)),
-                    volume: Math.floor(Math.random() * 1000) + 100
-                };
-            }).reverse();
-            setHistoricalData(data);
-            setLoading(false);
-        }, 500);
-    };
-
     const { market_data, prediction } = game;
     const spread = market_data?.spread || 0;
     const spreadPct = market_data?.spread_pct || 0;
@@ -57,7 +26,7 @@ const MarketAnalysisPanel: React.FC<MarketAnalysisPanelProps> = ({ game }) => {
 
     const quality = getMarketQuality();
 
-    const renderOverview = () => (
+    return (
         <div className="space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
             {/* Market Quality Badge */}
             <div className={cn("rounded-xl p-5 border", quality.bgColor, "border-current/30")}>
@@ -181,158 +150,6 @@ const MarketAnalysisPanel: React.FC<MarketAnalysisPanelProps> = ({ game }) => {
                     )}
                 </div>
             </div>
-        </div>
-    );
-
-    const renderChart = () => (
-        <div className="space-y-4 animate-in fade-in slide-in-from-bottom-4 duration-500">
-            {loading ? (
-                <div className="flex items-center justify-center h-64">
-                    <div className="flex flex-col items-center gap-3">
-                        <div className="w-8 h-8 border-2 border-zinc-600 border-t-emerald-400 rounded-full animate-spin" />
-                        <span className="text-xs text-zinc-500">Loading market data...</span>
-                    </div>
-                </div>
-            ) : (
-                <>
-                    {/* Price Chart */}
-                    <div className="bg-zinc-900/50 rounded-xl p-4 border border-zinc-800">
-                        <div className="text-xs text-zinc-500 uppercase tracking-widest mb-4">24h Price Movement</div>
-                        <ResponsiveContainer width="100%" height={200}>
-                            <AreaChart data={historicalData}>
-                                <defs>
-                                    <linearGradient id="priceGradient" x1="0" y1="0" x2="0" y2="1">
-                                        <stop offset="5%" stopColor="#10b981" stopOpacity={0.3} />
-                                        <stop offset="95%" stopColor="#10b981" stopOpacity={0} />
-                                    </linearGradient>
-                                </defs>
-                                <CartesianGrid strokeDasharray="3 3" stroke="#27272a" />
-                                <XAxis
-                                    dataKey="time"
-                                    stroke="#71717a"
-                                    tick={{ fontSize: 10, fill: '#a1a1aa' }}
-                                    tickLine={false}
-                                />
-                                <YAxis
-                                    stroke="#71717a"
-                                    tick={{ fontSize: 10, fill: '#a1a1aa' }}
-                                    tickLine={false}
-                                    domain={[0, 100]}
-                                />
-                                <Tooltip
-                                    contentStyle={{
-                                        backgroundColor: '#18181b',
-                                        border: '1px solid #27272a',
-                                        borderRadius: '8px'
-                                    }}
-                                    labelStyle={{ color: '#a1a1aa' }}
-                                />
-                                <Area
-                                    type="monotone"
-                                    dataKey="price"
-                                    stroke="#10b981"
-                                    strokeWidth={2}
-                                    fill="url(#priceGradient)"
-                                />
-                            </AreaChart>
-                        </ResponsiveContainer>
-                    </div>
-
-                    {/* Volume Chart */}
-                    <div className="bg-zinc-900/50 rounded-xl p-4 border border-zinc-800">
-                        <div className="text-xs text-zinc-500 uppercase tracking-widest mb-4">24h Volume</div>
-                        <ResponsiveContainer width="100%" height={150}>
-                            <AreaChart data={historicalData}>
-                                <defs>
-                                    <linearGradient id="volumeGradient" x1="0" y1="0" x2="0" y2="1">
-                                        <stop offset="5%" stopColor="#3b82f6" stopOpacity={0.3} />
-                                        <stop offset="95%" stopColor="#3b82f6" stopOpacity={0} />
-                                    </linearGradient>
-                                </defs>
-                                <CartesianGrid strokeDasharray="3 3" stroke="#27272a" />
-                                <XAxis
-                                    dataKey="time"
-                                    stroke="#71717a"
-                                    tick={{ fontSize: 10, fill: '#a1a1aa' }}
-                                    tickLine={false}
-                                />
-                                <YAxis
-                                    stroke="#71717a"
-                                    tick={{ fontSize: 10, fill: '#a1a1aa' }}
-                                    tickLine={false}
-                                />
-                                <Tooltip
-                                    contentStyle={{
-                                        backgroundColor: '#18181b',
-                                        border: '1px solid #27272a',
-                                        borderRadius: '8px'
-                                    }}
-                                />
-                                <Area
-                                    type="monotone"
-                                    dataKey="volume"
-                                    stroke="#3b82f6"
-                                    strokeWidth={2}
-                                    fill="url(#volumeGradient)"
-                                />
-                            </AreaChart>
-                        </ResponsiveContainer>
-                    </div>
-                </>
-            )}
-        </div>
-    );
-
-    const renderTrade = () => (
-        <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
-            {/* Trading Disclaimer */}
-            <div className="bg-amber-500/10 border border-amber-500/30 rounded-xl p-4">
-                <div className="flex items-start gap-3">
-                    <AlertCircle size={20} className="text-amber-400 flex-shrink-0 mt-0.5" />
-                    <div>
-                        <div className="text-sm font-medium text-amber-400 mb-1">Trading Not Yet Implemented</div>
-                        <div className="text-xs text-amber-400/70">
-                            This is a read-only view. To place trades, visit Kalshi.com directly.
-                            Future updates will enable trading directly from this interface.
-                        </div>
-                    </div>
-                </div>
-            </div>
-
-            {/* Hypothetical Trade Calculator */}
-            <div className="bg-zinc-900/50 rounded-xl p-4 border border-zinc-800">
-                <div className="text-xs text-zinc-500 uppercase tracking-widest mb-4">Position Calculator</div>
-                <div className="space-y-4">
-                    <div>
-                        <label className="text-xs text-zinc-400 mb-2 block">Contracts</label>
-                        <input
-                            type="number"
-                            placeholder="100"
-                            className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:ring-1 focus:ring-emerald-500"
-                            disabled
-                        />
-                    </div>
-                    <div>
-                        <label className="text-xs text-zinc-400 mb-2 block">Entry Price</label>
-                        <input
-                            type="number"
-                            value={midPrice.toFixed(1)}
-                            className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:ring-1 focus:ring-emerald-500"
-                            disabled
-                        />
-                    </div>
-                    <div className="pt-4 border-t border-zinc-800">
-                        <div className="flex items-center justify-between mb-2">
-                            <span className="text-xs text-zinc-400">Max Profit (Yes wins)</span>
-                            <span className="text-sm font-mono text-emerald-400">—</span>
-                        </div>
-                        <div className="flex items-center justify-between">
-                            <span className="text-xs text-zinc-400">Max Loss (Yes loses)</span>
-                            <span className="text-sm font-mono text-rose-400">—</span>
-                        </div>
-                    </div>
-                </div>
-            </div>
 
             {/* External Link */}
             <a
@@ -343,40 +160,6 @@ const MarketAnalysisPanel: React.FC<MarketAnalysisPanelProps> = ({ game }) => {
             >
                 Trade on Kalshi.com →
             </a>
-        </div>
-    );
-
-    return (
-        <div className="space-y-6">
-            {/* Sub-tabs for Market Analysis */}
-            <div className="flex gap-2 border-b border-zinc-800 pb-4">
-                {[
-                    { id: 'overview', label: 'Overview', icon: Activity },
-                    { id: 'chart', label: 'Charts', icon: TrendingUp },
-                    { id: 'trade', label: 'Trade', icon: DollarSign }
-                ].map(tab => (
-                    <button
-                        key={tab.id}
-                        onClick={() => setActiveTab(tab.id as any)}
-                        className={cn(
-                            "flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-medium transition-all",
-                            activeTab === tab.id
-                                ? "bg-emerald-500/20 text-emerald-400 border border-emerald-500/30"
-                                : "text-zinc-400 hover:text-white hover:bg-zinc-800/50"
-                        )}
-                    >
-                        <tab.icon size={14} />
-                        {tab.label}
-                    </button>
-                ))}
-            </div>
-
-            {/* Content */}
-            <div className="min-h-[400px]">
-                {activeTab === 'overview' && renderOverview()}
-                {activeTab === 'chart' && renderChart()}
-                {activeTab === 'trade' && renderTrade()}
-            </div>
         </div>
     );
 };

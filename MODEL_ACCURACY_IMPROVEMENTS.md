@@ -65,6 +65,17 @@ The model now provides clearer explanations:
 - ✅ "Home team in strong recent form (80% win rate, +8.3 avg margin)"
 - ✅ "H2H: Home team 7-3 (avg margin: +5.2)"
 - ✅ "Season records: Home 71% vs Away 45%"
+- ✅ "Rest advantage favors Home (Home 2d vs Away 1d)"
+- ✅ "Travel impact: Long travel (3200km), Time zone shift (3h)"
+
+### 5. **Contextual Factors (New!)**
+- **Rest Penalty**:
+  - NBA: Back-to-back games (-3% win prob)
+  - NFL: Short week (-2% win prob)
+- **Travel Impact**:
+  - Distance > 2000 miles (-2% win prob)
+  - Time zone shift > 2.5 hours (-1.5% win prob)
+  - West Coast teams playing early East Coast games penalized
 
 ## Technical Details
 
