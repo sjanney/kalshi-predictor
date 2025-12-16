@@ -24,6 +24,8 @@ class NBAClient:
         self.headers = {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
         }
+        self._cache = {}
+        self._cache_ttl = 30  # seconds
 
     def get_scoreboard(self, game_date: Optional[str] = None) -> List[Dict]:
         """
@@ -34,6 +36,13 @@ class NBAClient:
         else:
             # ESPN expects YYYYMMDD
             game_date = game_date.replace("-", "")
+            
+        # Check cache
+        now = datetime.now().timestamp()
+        if game_date in self._cache:
+            timestamp, data = self._cache[game_date]
+            if now - timestamp < self._cache_ttl:
+                return data
         
         try:
             print(f"Fetching ESPN scoreboard for date: {game_date}")
@@ -83,65 +92,15 @@ class NBAClient:
                 
             if not games:
                 print("No games found in ESPN response.")
-                return self.get_mock_games()
+                return []
+            
+            # Update cache
+            self._cache[game_date] = (now, games)
                 
             return games
         except Exception as e:
             print(f"Error fetching ESPN scoreboard: {e}")
-            return self.get_mock_games()
-
-    def get_mock_games(self) -> List[Dict]:
-        """Return mock games for testing/fallback"""
-        return [
-            {
-                "game_id": "0022300001",
-                "home_team_id": 1610612738, # BOS
-                "away_team_id": 1610612747, # LAL
-                "game_date": (datetime.now() + timedelta(hours=2)).isoformat(),
-                "status": "7:30 PM ET",
-                "home_team_name": "Boston Celtics",
-                "away_team_name": "Los Angeles Lakers",
-                "home_team_abbrev": "BOS",
-                "away_team_abbrev": "LAL",
-                "home_record": "45-12",
-                "away_record": "30-28",
-                "home_score": "0",
-                "away_score": "0",
-                "odds": {"spread": "BOS -5.5", "over_under": "225.5"}
-            },
-            {
-                "game_id": "0022300002",
-                "home_team_id": 1610612744, # GSW
-                "away_team_id": 1610612756, # PHX
-                "game_date": (datetime.now() + timedelta(hours=5)).isoformat(),
-                "status": "10:00 PM ET",
-                "home_team_name": "Golden State Warriors",
-                "away_team_name": "Phoenix Suns",
-                "home_team_abbrev": "GSW",
-                "away_team_abbrev": "PHX",
-                "home_record": "29-27",
-                "away_record": "33-24",
-                "home_score": "0",
-                "away_score": "0",
-                "odds": {"spread": "PHX -2.0", "over_under": "238.0"}
-            },
-            {
-                "game_id": "0022300003",
-                "home_team_id": 1610612748, # MIA
-                "away_team_id": 1610612749, # MIL
-                "game_date": (datetime.now() + timedelta(hours=3)).isoformat(),
-                "status": "8:00 PM ET",
-                "home_team_name": "Miami Heat",
-                "away_team_name": "Milwaukee Bucks",
-                "home_team_abbrev": "MIA",
-                "away_team_abbrev": "MIL",
-                "home_record": "32-25",
-                "away_record": "37-21",
-                "home_score": "0",
-                "away_score": "0",
-                "odds": {"spread": "MIL -3.5", "over_under": "218.5"}
-            }
-        ]
+            return []
 
     def get_team_stats(self):
         # Placeholder for fetching team stats (wins, losses, ratings)

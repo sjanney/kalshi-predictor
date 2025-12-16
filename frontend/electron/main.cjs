@@ -1,24 +1,26 @@
 const { app, BrowserWindow } = require('electron');
 const path = require('path');
 
-// IMPORTANT: This line fixes the 'Invalid mailbox' / 'SharedImageManager' black screen issues on macOS
-// It forces software rendering which is slightly slower but reliable.
-app.disableHardwareAcceleration();
+// Disable hardware acceleration to prevent rendering issues
+// app.disableHardwareAcceleration();
 
 function createWindow() {
     const win = new BrowserWindow({
         width: 1200,
         height: 800,
         webPreferences: {
-            nodeIntegration: true,
-            contextIsolation: false,
-            webSecurity: false,
-            devTools: true,
-            backgroundThrottling: false
+            nodeIntegration: false, // Security: Disable Node.js integration in renderer
+            contextIsolation: true, // Security: Enable context isolation
+            webSecurity: true, // Security: Enable web security
+            devTools: process.env.NODE_ENV === 'development',
+            backgroundThrottling: false,
+            spellcheck: false,
         },
         titleBarStyle: 'hiddenInset', 
         backgroundColor: '#09090b',
-        show: false
+        show: false,
+        frame: true,
+        transparent: false,
     });
 
     const isDev = process.env.NODE_ENV === 'development';
@@ -44,9 +46,10 @@ function createWindow() {
         win.show();
     });
     
-    setTimeout(() => {
-        if (!win.isVisible()) win.show();
-    }, 1000);
+    // Open external links in default browser
+    win.webContents.setWindowOpenHandler(({ url }) => {
+        return { action: 'allow' };
+    });
 }
 
 // Fix for the autofill/devtools errors

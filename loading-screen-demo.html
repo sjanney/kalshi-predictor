@@ -1,0 +1,229 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Loading Screen Demo - Kalshi Predictor</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+    
+    :root {
+      --color-background: #09090b;
+      --color-surface: #18181b;
+      --color-surface-highlight: #27272a;
+      --color-primary: #10b981;
+      --color-kalshi-green: #00d2be;
+    }
+    
+    body {
+      font-family: 'Inter', sans-serif;
+      background-color: var(--color-background);
+      margin: 0;
+      padding: 0;
+    }
+    
+    @keyframes shimmer {
+      0% { transform: translateX(-100%); }
+      100% { transform: translateX(100%); }
+    }
+    
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.5; }
+    }
+    
+    .animate-shimmer {
+      animation: shimmer 2s infinite;
+    }
+    
+    .animate-pulse {
+      animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+    }
+  </style>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            background: '#09090b',
+            surface: '#18181b',
+            'surface-highlight': '#27272a',
+            primary: '#10b981',
+            'kalshi-green': '#00d2be',
+          }
+        }
+      }
+    }
+  </script>
+</head>
+<body class="min-h-screen bg-background">
+  <div id="loading-screen" class="fixed inset-0 z-50 flex items-center justify-center bg-background transition-opacity duration-500">
+    <!-- Animated background gradient -->
+    <div class="absolute inset-0 overflow-hidden">
+      <div class="absolute inset-0 bg-gradient-to-br from-kalshi-green/5 via-transparent to-primary/5 animate-pulse" style="animation-duration: 3s;"></div>
+      <div class="absolute top-1/4 left-1/4 w-96 h-96 bg-kalshi-green/10 rounded-full blur-3xl animate-pulse" style="animation-duration: 4s; animation-delay: 0.5s;"></div>
+      <div class="absolute bottom-1/4 right-1/4 w-96 h-96 bg-primary/10 rounded-full blur-3xl animate-pulse" style="animation-duration: 5s; animation-delay: 1s;"></div>
+    </div>
+
+    <!-- Loading content -->
+    <div class="relative z-10 flex flex-col items-center gap-8 px-8 max-w-md w-full">
+      <!-- Logo/Icon -->
+      <div class="relative">
+        <div class="absolute inset-0 bg-kalshi-green/20 rounded-full blur-xl animate-pulse"></div>
+        <div class="relative w-20 h-20 rounded-full bg-gradient-to-br from-kalshi-green to-primary flex items-center justify-center">
+          <svg class="w-10 h-10 text-white animate-pulse" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z" />
+          </svg>
+        </div>
+      </div>
+
+      <!-- App Title -->
+      <div class="text-center">
+        <h1 class="text-3xl font-bold text-white mb-2 tracking-tight">
+          Kalshi Predictor
+        </h1>
+        <p class="text-sm text-zinc-400">
+          AI-Powered Market Intelligence
+        </p>
+      </div>
+
+      <!-- Progress Bar -->
+      <div class="w-full space-y-3">
+        <!-- Current step label -->
+        <div class="flex items-center justify-between text-sm">
+          <span id="step-label" class="text-zinc-300 font-medium animate-pulse">
+            Initializing application...
+          </span>
+          <span id="progress-percent" class="text-kalshi-green font-mono font-semibold">
+            0%
+          </span>
+        </div>
+
+        <!-- Progress bar container -->
+        <div class="relative h-2 bg-surface rounded-full overflow-hidden">
+          <!-- Background shimmer effect -->
+          <div class="absolute inset-0 bg-gradient-to-r from-transparent via-white/5 to-transparent animate-shimmer" style="background-size: 200% 100%;"></div>
+          
+          <!-- Actual progress -->
+          <div id="progress-bar" class="absolute inset-y-0 left-0 bg-gradient-to-r from-kalshi-green to-primary rounded-full transition-all duration-300 ease-out" style="width: 0%;">
+            <!-- Glow effect -->
+            <div class="absolute inset-0 bg-gradient-to-r from-kalshi-green/50 to-primary/50 blur-sm"></div>
+          </div>
+        </div>
+
+        <!-- Step indicators -->
+        <div class="flex justify-between gap-2 pt-2">
+          <div class="flex-1 h-1 rounded-full bg-surface overflow-hidden">
+            <div id="indicator-0" class="h-full transition-all duration-500 bg-transparent w-0"></div>
+          </div>
+          <div class="flex-1 h-1 rounded-full bg-surface overflow-hidden">
+            <div id="indicator-1" class="h-full transition-all duration-500 bg-transparent w-0"></div>
+          </div>
+          <div class="flex-1 h-1 rounded-full bg-surface overflow-hidden">
+            <div id="indicator-2" class="h-full transition-all duration-500 bg-transparent w-0"></div>
+          </div>
+          <div class="flex-1 h-1 rounded-full bg-surface overflow-hidden">
+            <div id="indicator-3" class="h-full transition-all duration-500 bg-transparent w-0"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Subtle loading dots -->
+      <div class="flex gap-2">
+        <div class="w-2 h-2 rounded-full bg-kalshi-green/50 animate-pulse" style="animation-delay: 0s; animation-duration: 1.5s;"></div>
+        <div class="w-2 h-2 rounded-full bg-kalshi-green/50 animate-pulse" style="animation-delay: 0.2s; animation-duration: 1.5s;"></div>
+        <div class="w-2 h-2 rounded-full bg-kalshi-green/50 animate-pulse" style="animation-delay: 0.4s; animation-duration: 1.5s;"></div>
+      </div>
+
+      <!-- Demo Controls -->
+      <div class="mt-8 text-center">
+        <button id="restart-btn" class="px-6 py-2 bg-kalshi-green hover:bg-kalshi-green/80 text-white rounded-lg font-medium transition-colors">
+          Restart Demo
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const LOADING_STEPS = [
+      { id: 'init', label: 'Initializing application...', duration: 400 },
+      { id: 'backend', label: 'Connecting to prediction engine...', duration: 600 },
+      { id: 'data', label: 'Loading market data...', duration: 800 },
+      { id: 'ui', label: 'Preparing dashboard...', duration: 500 },
+    ];
+
+    let currentStepIndex = 0;
+    let progress = 0;
+    let startTime = Date.now();
+    let animationFrameId = null;
+
+    function updateProgress() {
+      const currentStep = LOADING_STEPS[currentStepIndex];
+      const elapsed = Date.now() - startTime;
+      const stepProgress = Math.min(elapsed / currentStep.duration, 1);
+
+      // Calculate overall progress
+      const completedSteps = currentStepIndex;
+      const totalSteps = LOADING_STEPS.length;
+      const overallProgress = ((completedSteps + stepProgress) / totalSteps) * 100;
+
+      progress = overallProgress;
+
+      // Update UI
+      document.getElementById('progress-bar').style.width = `${progress}%`;
+      document.getElementById('progress-percent').textContent = `${Math.round(progress)}%`;
+      document.getElementById('step-label').textContent = currentStep.label;
+
+      // Update step indicators
+      LOADING_STEPS.forEach((step, index) => {
+        const indicator = document.getElementById(`indicator-${index}`);
+        if (index < currentStepIndex) {
+          indicator.className = 'h-full transition-all duration-500 bg-kalshi-green w-full';
+        } else if (index === currentStepIndex) {
+          indicator.className = 'h-full transition-all duration-500 bg-kalshi-green/50 w-full animate-pulse';
+        } else {
+          indicator.className = 'h-full transition-all duration-500 bg-transparent w-0';
+        }
+      });
+
+      if (stepProgress < 1) {
+        animationFrameId = requestAnimationFrame(updateProgress);
+      } else {
+        // Move to next step
+        if (currentStepIndex < LOADING_STEPS.length - 1) {
+          setTimeout(() => {
+            currentStepIndex++;
+            startTime = Date.now();
+            updateProgress();
+          }, 100);
+        } else {
+          // All steps complete
+          setTimeout(() => {
+            document.getElementById('loading-screen').style.opacity = '0';
+          }, 300);
+        }
+      }
+    }
+
+    function startLoading() {
+      currentStepIndex = 0;
+      progress = 0;
+      startTime = Date.now();
+      document.getElementById('loading-screen').style.opacity = '1';
+      updateProgress();
+    }
+
+    // Start on page load
+    startLoading();
+
+    // Restart button
+    document.getElementById('restart-btn').addEventListener('click', () => {
+      if (animationFrameId) {
+        cancelAnimationFrame(animationFrameId);
+      }
+      startLoading();
+    });
+  </script>
+</body>
+</html>

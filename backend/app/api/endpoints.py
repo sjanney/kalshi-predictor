@@ -1,16 +1,37 @@
 from fastapi import APIRouter, HTTPException, Query
 from typing import List, Dict, Optional
+import logging
 from app.services.kalshi import KalshiClient
 from app.services.nba import NBAClient
+from app.services.nfl import NFLClient
 from app.services.prediction import PredictionEngine
-import difflib
+from app.services.enhanced_prediction import EnhancedPredictionEngine
+from app.services.data_feeds import DataFeeds
+from app.services.enhanced_data_feeds import EnhancedDataFeeds
+from app.services.insights_generator import InsightsGenerator
+from app.services.automation import AutomationService
+from app.core.security import license_manager
+from pydantic import BaseModel
 import re
+import time
+import asyncio
+from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime, timedelta
+
+# Configure structured logging
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
 kalshi_client = KalshiClient()
 nba_client = NBAClient()
+nfl_client = NFLClient()
 prediction_engine = PredictionEngine()
+enhanced_prediction_engine = EnhancedPredictionEngine()
+data_feeds = DataFeeds()
+enhanced_data_feeds = EnhancedDataFeeds()
+insights_generator = InsightsGenerator()
+automation_service = AutomationService()
 
 def _build_team_keys(name: str, abbr: str) -> List[str]:
     """Return a list of lowercase tokens that can identify a team."""
@@ -36,9 +57,12 @@ def _market_text(market: Dict) -> str:
 
 def match_game_to_markets(game: Dict, markets: List[Dict]) -> Optional[Dict]:
     """
-    Match an NBA game to a Kalshi market (or pair of markets).
+    Match a game to a Kalshi market (or pair of markets).
     Returns a dict with 'home_market' and 'away_market' keys if found.
     """
+    if not markets:
+        return None
+        
     home_name = game.get('home_team_name', '')
     away_name = game.get('away_team_name', '')
     home_abbr = game.get('home_team_abbrev', '')
@@ -106,73 +130,258 @@ def match_game_to_markets(game: Dict, markets: List[Dict]) -> Optional[Dict]:
 
     return None
 
+class SimpleCache:
+    def __init__(self, ttl_seconds: int = 60):
+        self.cache = {}
+        self.ttl = ttl_seconds
+    
+    def get(self, key):
+        if key in self.cache:
+            data, timestamp = self.cache[key]
+            if time.time() - timestamp < self.ttl:
+                return data
+            else:
+                del self.cache[key]
+        return None
+    
+    def set(self, key, value):
+        self.cache[key] = (value, time.time())
+
+# Cache for 5 minutes (increased from 2 minutes for better performance)
+predictions_cache = SimpleCache(ttl_seconds=300)
+
+# Request deduplication - prevent multiple identical requests
+_pending_requests = {}
+_request_locks = {}
+
+# Create a thread pool for parallel processing
+# 50 workers allows processing many games simultaneously
+executor = ThreadPoolExecutor(max_workers=50)
+
+def _process_single_game(game: Dict, markets: List[Dict], league: str, use_enhanced: bool, all_games: List[Dict]) -> Optional[Dict]:
+    """Process a single game prediction in isolation (synchronous for thread pool)."""
+    game_id = game.get('game_id', 'unknown')
+    try:
+        home_stats = {} 
+        away_stats = {}
+        
+        matched_markets = match_game_to_markets(game, markets)
+        
+        # Process game even if no markets found - prediction engine will use defaults
+        if not matched_markets:
+            logger.debug(f"No matching Kalshi markets found for {game_id} ({game.get('home_team_abbrev')} vs {game.get('away_team_abbrev')}), proceeding with model-only prediction")
+            matched_markets = None
+            
+        # Use enhanced engine if enabled
+        if use_enhanced:
+            prediction_data = enhanced_prediction_engine.generate_prediction(
+                {**game, "league": league},
+                home_stats,
+                away_stats,
+                matched_markets,
+                all_games=all_games,
+                include_intelligence=False
+            )
+        else:
+            prediction_data = prediction_engine.generate_prediction(
+                {**game, "league": league},
+                home_stats,
+                away_stats,
+                matched_markets,
+                include_intelligence=False
+            )
+        
+        # Get market context
+        try:
+            market_context = enhanced_data_feeds.get_market_context(
+                game.get('home_team_abbrev', ''),
+                game.get('away_team_abbrev', ''),
+                game.get('game_date', ''),
+                league,
+                include_intelligence=False
+            )
+            
+            insights = insights_generator.generate_insights(
+                prediction_data,
+                market_context
+            )
+            
+            if 'analytics' not in prediction_data:
+                prediction_data['analytics'] = {}
+            prediction_data['analytics']['insights'] = insights
+            prediction_data['market_context'] = market_context
+            
+        except Exception as e:
+            logger.error(f"Error generating insights for {game_id}: {e}", exc_info=True)
+        
+        # Add timestamp for frontend sync
+        prediction_data['last_updated'] = int(time.time() * 1000)
+        
+        return prediction_data
+        
+    except Exception as e:
+        logger.error(f"Error processing game {game_id}: {e}", exc_info=True)
+        return None
+
+async def _fetch_games_for_dates(league: str, dates: List[str]) -> List[Dict]:
+    """Fetch games for a list of specific dates."""
+    loop = asyncio.get_running_loop()
+    tasks = []
+    
+    for date in dates:
+        if league == "nba":
+            tasks.append(loop.run_in_executor(executor, nba_client.get_scoreboard, date))
+        elif league == "nfl":
+            tasks.append(loop.run_in_executor(executor, nfl_client.get_scoreboard, date))
+            
+    results = await asyncio.gather(*tasks, return_exceptions=True)
+    
+    all_games = []
+    for res in results:
+        if isinstance(res, list):
+            all_games.extend(res)
+            
+    return all_games
+
+async def _get_league_predictions(league: str, use_enhanced: bool = True) -> List[Dict]:
+    """Helper to get predictions for a specific league with true multithreading."""
+    
+    # Check cache
+    cache_key = f"{league}_{use_enhanced}"
+    cached = predictions_cache.get(cache_key)
+    if cached:
+        logger.info(f"Returning cached predictions for {league}")
+        return cached
+
+    # Request deduplication
+    if cache_key in _pending_requests:
+        logger.info(f"Request for {cache_key} already in progress, waiting...")
+        return await _pending_requests[cache_key]
+
+    loop = asyncio.get_running_loop()
+    future = loop.create_future()
+    _pending_requests[cache_key] = future
+
+    try:
+        today = datetime.now()
+        
+        # 1. Define Date Ranges
+        # Display: Yesterday, Today, Next 7 days (to show completed, live, and upcoming including NFL)
+        display_dates = [
+            (today - timedelta(days=1)).strftime("%Y%m%d"),
+            today.strftime("%Y%m%d")
+        ]
+        # Add next 7 days
+        for i in range(1, 8):
+            display_dates.append((today + timedelta(days=i)).strftime("%Y%m%d"))
+        
+        # Context: Past 10 days (excluding yesterday which is in display_dates)
+        # We go from 2 days ago back to 10 days ago
+        context_dates = [
+            (today - timedelta(days=i)).strftime("%Y%m%d") 
+            for i in range(2, 11)
+        ]
+        
+        # 2. Fetch Games
+        logger.info(f"Fetching {league.upper()} games for display (3 days) and context (9 days)...")
+        
+        # Run both fetches in parallel
+        display_games_task = _fetch_games_for_dates(league, display_dates)
+        context_games_task = _fetch_games_for_dates(league, context_dates)
+        
+        display_games, context_games = await asyncio.gather(display_games_task, context_games_task)
+        
+        # Combine for context usage
+        all_games = display_games + context_games
+        
+        logger.info(f"Fetched {len(display_games)} display games and {len(context_games)} context games")
+
+        if not display_games:
+            results = []
+        else:
+            # 3. Fetch Kalshi Markets
+            logger.info(f"Fetching Kalshi {league.upper()} markets...")
+            try:
+                markets = await loop.run_in_executor(executor, kalshi_client.get_league_markets, league)
+                logger.info(f"Markets fetched: {len(markets) if markets else 0}")
+                
+                # Check if we have any valid matches
+                has_valid_matches = False
+                if display_games and markets:
+                    # Quick check on first few games to see if we have matches
+                    for game in display_games[:3]: 
+                        if match_game_to_markets(game, markets):
+                            has_valid_matches = True
+                            break
+                
+                if not has_valid_matches and display_games:
+                     logger.warning("No matching game markets found. Will still generate model-only predictions.")
+
+            except Exception as e:
+                logger.error(f"Error fetching markets: {e}", exc_info=True)
+                markets = []
+            
+            # 4. Match Games to Markets and Generate Predictions
+            logger.info(f"Generating predictions for {len(display_games)} games using {executor._max_workers} threads...")
+            
+            # Create futures for all display games to run in the thread pool
+            futures = [
+                loop.run_in_executor(
+                    executor,
+                    _process_single_game,
+                    game,
+                    markets,
+                    league,
+                    use_enhanced,
+                    all_games # Pass combined history for accurate stats
+                )
+                for game in display_games
+            ]
+            
+            # Wait for all threads to complete
+            if futures:
+                processed_results = await asyncio.gather(*futures, return_exceptions=True)
+                results = [r for r in processed_results if r is not None and not isinstance(r, Exception)]
+                
+                # Log any exceptions
+                exceptions = [r for r in processed_results if isinstance(r, Exception)]
+                if exceptions:
+                    logger.warning(f"Encountered {len(exceptions)} exceptions during game processing")
+    
+        # Update cache and resolve pending requests
+        predictions_cache.set(cache_key, results)
+        
+        if cache_key in _pending_requests:
+            future = _pending_requests.pop(cache_key)
+            if not future.done():
+                future.set_result(results)
+        
+        return results
+
+    except Exception as e:
+        logger.error(f"Error in _get_league_predictions: {e}", exc_info=True)
+        # Clean up pending request on error
+        if cache_key in _pending_requests:
+            future = _pending_requests.pop(cache_key)
+            if not future.done():
+                future.set_exception(e)
+        raise
+
 @router.get("/games", response_model=List[Dict])
 async def get_games(
     sort_by: str = Query("time", enum=["time", "divergence", "confidence"]),
+    league: str = Query("nba", enum=["nba", "nfl"]),
     filter_status: Optional[str] = None
 ):
     """
     Get upcoming games with predictions.
     """
-    # 1. Fetch NBA Games
-    print("Fetching games...")
-    try:
-        games = nba_client.get_scoreboard()
-        print(f"Games fetched: {len(games) if games else 0}")
-    except Exception as e:
-        print(f"Error in get_scoreboard: {e}")
-        games = []
-
-    if not games:
-        return []
-        
-    # 2. Fetch Kalshi Markets
-    print("Fetching Kalshi markets...")
-    try:
-        markets = kalshi_client.get_nba_markets()
-        print(f"Markets fetched: {len(markets) if markets else 0}")
-        
-        # Check if we have any valid matches
-        has_valid_matches = False
-        if games and markets:
-            for game in games[:3]: # Check first few games
-                if match_game_to_markets(game, markets):
-                    has_valid_matches = True
-                    break
-        
-        if not has_valid_matches and games:
-             print("DEBUG: No matching game markets found. Generating MOCK markets for demo.")
-             markets = kalshi_client.generate_mock_markets_for_games(games)
-             print(f"Mock markets generated: {len(markets)}")
-
-    except Exception as e:
-        print(f"Error fetching markets: {e}")
-        markets = []
+    results = await _get_league_predictions(league)
     
-    # 3. Match Games to Markets and Generate Predictions
-    results = []
-    for game in games:
-        try:
-            # Filter status if requested
-            if filter_status and filter_status.lower() not in game.get('status', '').lower():
-                continue
+    # Filtering
+    if filter_status:
+        results = [r for r in results if filter_status.lower() in r.get('status', '').lower()]
 
-            # Placeholder stats (fetching is expensive/complex without paid API, using records)
-            home_stats = {} 
-            away_stats = {}
-            
-            matched_markets = match_game_to_markets(game, markets)
-            
-            prediction_data = prediction_engine.generate_prediction(
-                game, home_stats, away_stats, matched_markets
-            )
-            
-            results.append(prediction_data)
-            
-        except Exception as e:
-            print(f"Error processing game {game.get('game_id')}: {e}")
-            continue
-            
     # Sorting
     if sort_by == "divergence":
         results.sort(key=lambda x: x['prediction']['divergence'], reverse=True)
@@ -180,12 +389,126 @@ async def get_games(
         # Custom sort for High > Medium > Low
         conf_map = {"HIGH": 3, "MEDIUM": 2, "LOW": 1}
         results.sort(key=lambda x: conf_map.get(x['prediction']['confidence_score'], 0), reverse=True)
-    else: # time (default) - assuming games are already roughly sorted by time
+    else: # time (default)
         pass
             
-    print(f"Returning {len(results)} results")
+    logger.info(f"Returning {len(results)} results")
     return results
 
 @router.get("/games/{game_id}")
-async def get_game_details(game_id: str):
-    return {"game_id": game_id, "details": "Deep dive analysis coming soon in v2.1"}
+async def get_game_details(game_id: str, league: Optional[str] = Query(None, enum=["nba", "nfl"])):
+    """
+    Get deep dive details for a specific game.
+    If league is provided, only checks that league (faster).
+    Otherwise checks both leagues.
+    """
+    # If league is specified, only check that league
+    if league:
+        games = await _get_league_predictions(league)
+        for game in games:
+            if str(game['game_id']) == str(game_id):
+                return game
+        raise HTTPException(status_code=404, detail="Game not found")
+    
+    # Otherwise check both leagues (backward compatibility)
+    # Try NBA first
+    nba_games = await _get_league_predictions("nba")
+    for game in nba_games:
+        if str(game['game_id']) == str(game_id):
+            return game
+            
+    # Try NFL
+    nfl_games = await _get_league_predictions("nfl")
+    for game in nfl_games:
+        if str(game['game_id']) == str(game_id):
+            return game
+            
+    raise HTTPException(status_code=404, detail="Game not found")
+
+@router.get("/market-context")
+async def get_market_context(
+    home_team: str,
+    away_team: str,
+    game_date: str,
+    league: str = "nfl"
+):
+    """
+    Fetch external context (weather, injuries, news) for a matchup.
+    Uses enhanced data feeds with real injury data and weather correlation.
+    """
+    try:
+        return enhanced_data_feeds.get_market_context(home_team, away_team, game_date, league)
+    except Exception as e:
+        logger.error(f"Error fetching market context: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Failed to fetch market context")
+
+@router.post("/alerts/run")
+async def run_alerts():
+    """
+    Trigger manual alert scan.
+    """
+    return await automation_service.check_alerts()
+
+class LicenseUpdate(BaseModel):
+    license_key: str
+
+@router.get("/license/status")
+async def get_license_status():
+    """Check current license status."""
+    if license_manager.load_and_verify_stored_license():
+        data = license_manager.license_data or {}
+        return {"status": "valid", "type": "pro", "data": data}
+    return {"status": "invalid", "type": "free"}
+
+from pathlib import Path
+from app.core.database import db_manager
+
+# ... (existing imports)
+
+# ... (existing code)
+
+@router.get("/accuracy/metrics")
+async def get_accuracy_metrics(days_back: int = 30):
+    """Get accuracy metrics from the database."""
+    return db_manager.get_accuracy_metrics(days_back)
+
+@router.get("/calibration/status")
+async def get_calibration_status():
+    """Get calibration status (placeholder for now)."""
+    return {
+        "calibrated": False,
+        "last_calibrated": None,
+        "current_weights": {},
+        "calibration_count": 0,
+        "component_accuracy": {}
+    }
+
+@router.post("/license/disconnect")
+async def disconnect_license():
+    """Remove the current license key."""
+    try:
+        license_path = Path("license.key")
+        if license_path.exists():
+            license_path.unlink()
+        
+        # Reset license manager state
+        license_manager.license_data = None
+        
+        return {"status": "success", "message": "License disconnected"}
+    except Exception as e:
+        logger.error(f"Error disconnecting license: {e}")
+        raise HTTPException(status_code=500, detail="Failed to disconnect license")
+
+@router.post("/license/update")
+async def update_license(update: LicenseUpdate):
+    """Update the license key."""
+    try:
+        if license_manager.verify_license(update.license_key):
+            with open("license.key", "w") as f:
+                f.write(update.license_key)
+            return {"status": "success", "message": "License updated successfully"}
+        else:
+            raise HTTPException(status_code=400, detail="Invalid license key")
+    except Exception as e:
+        logger.error(f"Error updating license: {e}")
+        raise HTTPException(status_code=500, detail="Failed to update license")

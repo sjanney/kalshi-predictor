@@ -1,0 +1,742 @@
+[
+  {
+    "game_id": "401810138",
+    "league": "nba",
+    "timestamp": "2025-11-24T22:48:52.296705",
+    "home_team": "Indiana Pacers",
+    "away_team": "Detroit Pistons",
+    "game_date": "2025-11-25T00:00Z",
+    "prediction": {
+      "home_win_prob": 0.211,
+      "stat_model_prob": 0.168,
+      "kalshi_prob": 0.2,
+      "elo_prob": 1500.0,
+      "form_prob": 0.0
+    },
+    "outcome": {
+      "home_won": false,
+      "home_score": 117,
+      "away_score": 122
+    },
+    "verified": true,
+    "verified_at": "2025-11-24T22:48:52.296723"
+  },
+  {
+    "game_id": "401810139",
+    "league": "nba",
+    "timestamp": "2025-11-24T22:48:52.296724",
+    "home_team": "Toronto Raptors",
+    "away_team": "Cleveland Cavaliers",
+    "game_date": "2025-11-25T00:00Z",
+    "prediction": {
+      "home_win_prob": 0.687,
+      "stat_model_prob": 0.595,
+      "kalshi_prob": 0.5,
+      "elo_prob": 1500.0,
+      "form_prob": 1.0
+    },
+    "outcome": {
+      "home_won": true,
+      "home_score": 110,
+      "away_score": 99
+    },
+    "verified": true,
+    "verified_at": "2025-11-24T22:48:52.296728"
+  },
+  {
+    "game_id": "401810140",
+    "league": "nba",
+    "timestamp": "2025-11-24T22:48:52.296728",
+    "home_team": "Brooklyn Nets",
+    "away_team": "New York Knicks",
+    "game_date": "2025-11-25T00:30Z",
+    "prediction": {
+      "home_win_prob": 0.35,
+      "stat_model_prob": 0.326,
+      "kalshi_prob": 0.5,
+      "elo_prob": 1500.0,
+      "form_prob": 0.0
+    },
+    "outcome": {
+      "home_won": false,
+      "home_score": 100,
+      "away_score": 113
+    },
+    "verified": true,
+    "verified_at": "2025-11-24T22:48:52.296731"
+  },
+  {
+    "game_id": "401810141",
+    "league": "nba",
+    "timestamp": "2025-11-24T22:48:52.296731",
+    "home_team": "Miami Heat",
+    "away_team": "Dallas Mavericks",
+    "game_date": "2025-11-25T00:30Z",
+    "prediction": {
+      "home_win_prob": 0.743,
+      "stat_model_prob": 0.752,
+      "kalshi_prob": 0.5,
+      "elo_prob": 1500.0,
+      "form_prob": 1.0
+    },
+    "outcome": {
+      "home_won": true,
+      "home_score": 106,
+      "away_score": 102
+    },
+    "verified": true,
+    "verified_at": "2025-11-24T22:48:52.296733"
+  },
+  {
+    "game_id": "401810142",
+    "league": "nba",
+    "timestamp": "2025-11-24T22:48:52.296734",
+    "home_team": "Memphis Grizzlies",
+    "away_team": "Denver Nuggets",
+    "game_date": "2025-11-25T01:00Z",
+    "prediction": {
+      "home_win_prob": 0.431,
+      "stat_model_prob": 0.334,
+      "kalshi_prob": 0.57,
+      "elo_prob": 1500.0,
+      "form_prob": 0.0
+    },
+    "outcome": {
+      "home_won": false,
+      "home_score": 115,
+      "away_score": 125
+    },
+    "verified": true,
+    "verified_at": "2025-11-24T22:48:52.296735"
+  },
+  {
+    "game_id": "401810143",
+    "league": "nba",
+    "timestamp": "2025-11-24T22:48:52.296736",
+    "home_team": "Milwaukee Bucks",
+    "away_team": "Portland Trail Blazers",
+    "game_date": "2025-11-25T01:00Z",
+    "prediction": {
+      "home_win_prob": 0.553,
+      "stat_model_prob": 0.55,
+      "kalshi_prob": 0.77,
+      "elo_prob": 1500.0,
+      "form_prob": 0.0
+    },
+    "outcome": {
+      "home_won": false,
+      "home_score": 103,
+      "away_score": 115
+    },
+    "verified": true,
+    "verified_at": "2025-11-24T22:48:52.296737"
+  },
+  {
+    "game_id": "401810144",
+    "league": "nba",
+    "timestamp": "2025-11-24T22:48:52.296738",
+    "home_team": "New Orleans Pelicans",
+    "away_team": "Chicago Bulls",
+    "game_date": "2025-11-25T01:00Z",
+    "prediction": {
+      "home_win_prob": 0.605,
+      "stat_model_prob": 0.369,
+      "kalshi_prob": 0.5,
+      "elo_prob": 1500.0,
+      "form_prob": 1.0
+    },
+    "outcome": {
+      "home_won": true,
+      "home_score": 143,
+      "away_score": 130
+    },
+    "verified": true,
+    "verified_at": "2025-11-24T22:48:52.296739"
+  },
+  {
+    "game_id": "401810145",
+    "league": "nba",
+    "timestamp": "2025-11-24T22:48:52.296740",
+    "home_team": "Phoenix Suns",
+    "away_team": "Houston Rockets",
+    "game_date": "2025-11-25T02:30Z",
+    "prediction": {
+      "home_win_prob": 0.518,
+      "stat_model_prob": 0.489,
+      "kalshi_prob": 0.68,
+      "elo_prob": 1500.0,
+      "form_prob": 0.0
+    },
+    "outcome": {
+      "home_won": false,
+      "home_score": 92,
+      "away_score": 114
+    },
+    "verified": true,
+    "verified_at": "2025-11-24T22:48:52.296741"
+  },
+  {
+    "game_id": "401810146",
+    "league": "nba",
+    "timestamp": "2025-11-24T22:48:52.296741",
+    "home_team": "Golden State Warriors",
+    "away_team": "Utah Jazz",
+    "game_date": "2025-11-25T03:00Z",
+    "prediction": {
+      "home_win_prob": 0.712,
+      "stat_model_prob": 0.666,
+      "kalshi_prob": 0.5,
+      "elo_prob": 1500.0,
+      "form_prob": 1.0
+    },
+    "outcome": {
+      "home_won": true,
+      "home_score": 134,
+      "away_score": 117
+    },
+    "verified": true,
+    "verified_at": "2025-11-24T22:48:52.296743"
+  },
+  {
+    "game_id": "401810147",
+    "league": "nba",
+    "timestamp": "2025-11-24T22:48:52.296743",
+    "home_team": "Sacramento Kings",
+    "away_team": "Minnesota Timberwolves",
+    "game_date": "2025-11-25T03:00Z",
+    "prediction": {
+      "home_win_prob": 0.588,
+      "stat_model_prob": 0.395,
+      "kalshi_prob": 0.68,
+      "elo_prob": 1500.0,
+      "form_prob": 0.5
+    },
+    "outcome": {
+      "home_won": true,
+      "home_score": 117,
+      "away_score": 112
+    },
+    "verified": true,
+    "verified_at": "2025-11-24T22:48:52.296745"
+  },
+  {
+    "game_id": "401772820",
+    "league": "nfl",
+    "timestamp": "2025-11-24T22:48:52.296745",
+    "home_team": "San Francisco 49ers",
+    "away_team": "Carolina Panthers",
+    "game_date": "2025-11-25T01:15Z",
+    "prediction": {
+      "home_win_prob": 0.533,
+      "stat_model_prob": 0.633,
+      "kalshi_prob": 0.29,
+      "elo_prob": 1500.0,
+      "form_prob": 1.0
+    },
+    "outcome": {
+      "home_won": true,
+      "home_score": 20,
+      "away_score": 9
+    },
+    "verified": true,
+    "verified_at": "2025-11-24T22:48:52.296747"
+  },
+  {
+    "game_id": "401772891",
+    "league": "nfl",
+    "timestamp": "2025-11-24T22:48:52.296747",
+    "home_team": "Detroit Lions",
+    "away_team": "Green Bay Packers",
+    "game_date": "2025-11-27T18:00Z",
+    "prediction": {
+      "home_win_prob": 0.532,
+      "stat_model_prob": 0.618,
+      "kalshi_prob": 0.21,
+      "elo_prob": 1500.0,
+      "form_prob": 0.5
+    },
+    "outcome": null,
+    "verified": false
+  },
+  {
+    "game_id": "401772694",
+    "league": "nfl",
+    "timestamp": "2025-11-24T22:48:52.296749",
+    "home_team": "Dallas Cowboys",
+    "away_team": "Kansas City Chiefs",
+    "game_date": "2025-11-27T21:30Z",
+    "prediction": {
+      "home_win_prob": 0.499,
+      "stat_model_prob": 0.527,
+      "kalshi_prob": 0.21,
+      "elo_prob": 1500.0,
+      "form_prob": 0.5
+    },
+    "outcome": null,
+    "verified": false
+  },
+  {
+    "game_id": "401772930",
+    "league": "nfl",
+    "timestamp": "2025-11-24T22:48:52.296750",
+    "home_team": "Baltimore Ravens",
+    "away_team": "Cincinnati Bengals",
+    "game_date": "2025-11-28T01:20Z",
+    "prediction": {
+      "home_win_prob": 0.601,
+      "stat_model_prob": 0.686,
+      "kalshi_prob": 0.505,
+      "elo_prob": 1500.0,
+      "form_prob": 0.5
+    },
+    "outcome": null,
+    "verified": false
+  },
+  {
+    "game_id": "401772621",
+    "league": "nfl",
+    "timestamp": "2025-11-24T22:48:52.296751",
+    "home_team": "Philadelphia Eagles",
+    "away_team": "Chicago Bears",
+    "game_date": "2025-11-28T20:00Z",
+    "prediction": {
+      "home_win_prob": 0.55,
+      "stat_model_prob": 0.55,
+      "kalshi_prob": 0.495,
+      "elo_prob": 1500.0,
+      "form_prob": 0.5
+    },
+    "outcome": {
+      "home_won": false,
+      "home_score": 15,
+      "away_score": 24
+    },
+    "verified": true,
+    "verified_at": "2025-11-28T15:03:51.734801"
+  },
+  {
+    "game_id": "401772785",
+    "league": "nfl",
+    "timestamp": "2025-11-24T22:48:52.296752",
+    "home_team": "Cleveland Browns",
+    "away_team": "San Francisco 49ers",
+    "game_date": "2025-11-30T18:00Z",
+    "prediction": {
+      "home_win_prob": 0.585,
+      "stat_model_prob": 0.353,
+      "kalshi_prob": 0.73,
+      "elo_prob": 1500.0,
+      "form_prob": 0.5
+    },
+    "outcome": null,
+    "verified": false
+  },
+  {
+    "game_id": "401772786",
+    "league": "nfl",
+    "timestamp": "2025-11-24T22:48:52.296754",
+    "home_team": "Tennessee Titans",
+    "away_team": "Jacksonville Jaguars",
+    "game_date": "2025-11-30T18:00Z",
+    "prediction": {
+      "home_win_prob": 0.502,
+      "stat_model_prob": 0.277,
+      "kalshi_prob": 0.83,
+      "elo_prob": 1500.0,
+      "form_prob": 0.5
+    },
+    "outcome": null,
+    "verified": false
+  },
+  {
+    "game_id": "401772787",
+    "league": "nfl",
+    "timestamp": "2025-11-24T22:48:52.296756",
+    "home_team": "Indianapolis Colts",
+    "away_team": "Houston Texans",
+    "game_date": "2025-11-30T18:00Z",
+    "prediction": {
+      "home_win_prob": 0.585,
+      "stat_model_prob": 0.641,
+      "kalshi_prob": 0.51,
+      "elo_prob": 1500.0,
+      "form_prob": 0.5
+    },
+    "outcome": null,
+    "verified": false
+  },
+  {
+    "game_id": "401772892",
+    "league": "nfl",
+    "timestamp": "2025-11-24T22:48:52.296757",
+    "home_team": "Miami Dolphins",
+    "away_team": "New Orleans Saints",
+    "game_date": "2025-11-30T18:00Z",
+    "prediction": {
+      "home_win_prob": 0.583,
+      "stat_model_prob": 0.641,
+      "kalshi_prob": 0.495,
+      "elo_prob": 1500.0,
+      "form_prob": 0.5
+    },
+    "outcome": null,
+    "verified": false
+  },
+  {
+    "game_id": "401772893",
+    "league": "nfl",
+    "timestamp": "2025-11-24T22:48:52.296758",
+    "home_team": "New York Jets",
+    "away_team": "Atlanta Falcons",
+    "game_date": "2025-11-30T18:00Z",
+    "prediction": {
+      "home_win_prob": 0.551,
+      "stat_model_prob": 0.459,
+      "kalshi_prob": 0.72,
+      "elo_prob": 1500.0,
+      "form_prob": 0.5
+    },
+    "outcome": null,
+    "verified": false
+  },
+  {
+    "game_id": "401772895",
+    "league": "nfl",
+    "timestamp": "2025-11-24T22:48:52.296759",
+    "home_team": "Tampa Bay Buccaneers",
+    "away_team": "Arizona Cardinals",
+    "game_date": "2025-11-30T18:00Z",
+    "prediction": {
+      "home_win_prob": 0.612,
+      "stat_model_prob": 0.686,
+      "kalshi_prob": 0.58,
+      "elo_prob": 1500.0,
+      "form_prob": 0.5
+    },
+    "outcome": null,
+    "verified": false
+  },
+  {
+    "game_id": "401772894",
+    "league": "nfl",
+    "timestamp": "2025-11-24T22:48:52.296760",
+    "home_team": "Carolina Panthers",
+    "away_team": "Los Angeles Rams",
+    "game_date": "2025-11-30T18:00Z",
+    "prediction": {
+      "home_win_prob": 0.668,
+      "stat_model_prob": 0.391,
+      "kalshi_prob": 0.88,
+      "elo_prob": 1500.0,
+      "form_prob": 0.0
+    },
+    "outcome": null,
+    "verified": false
+  },
+  {
+    "game_id": "401772896",
+    "league": "nfl",
+    "timestamp": "2025-11-24T22:48:52.296761",
+    "home_team": "Seattle Seahawks",
+    "away_team": "Minnesota Vikings",
+    "game_date": "2025-11-30T21:05Z",
+    "prediction": {
+      "home_win_prob": 0.615,
+      "stat_model_prob": 0.732,
+      "kalshi_prob": 0.495,
+      "elo_prob": 1500.0,
+      "form_prob": 0.5
+    },
+    "outcome": null,
+    "verified": false
+  },
+  {
+    "game_id": "401772789",
+    "league": "nfl",
+    "timestamp": "2025-11-24T22:48:52.296762",
+    "home_team": "Pittsburgh Steelers",
+    "away_team": "Buffalo Bills",
+    "game_date": "2025-11-30T21:25Z",
+    "prediction": {
+      "home_win_prob": 0.535,
+      "stat_model_prob": 0.505,
+      "kalshi_prob": 0.505,
+      "elo_prob": 1500.0,
+      "form_prob": 0.5
+    },
+    "outcome": null,
+    "verified": false
+  },
+  {
+    "game_id": "401772788",
+    "league": "nfl",
+    "timestamp": "2025-11-24T22:48:52.296763",
+    "home_team": "Los Angeles Chargers",
+    "away_team": "Las Vegas Raiders",
+    "game_date": "2025-11-30T21:25Z",
+    "prediction": {
+      "home_win_prob": 0.403,
+      "stat_model_prob": 0.777,
+      "kalshi_prob": 0.15,
+      "elo_prob": 1500.0,
+      "form_prob": 0.5
+    },
+    "outcome": null,
+    "verified": false
+  },
+  {
+    "game_id": "401772931",
+    "league": "nfl",
+    "timestamp": "2025-11-24T22:48:52.296764",
+    "home_team": "Washington Commanders",
+    "away_team": "Denver Broncos",
+    "game_date": "2025-12-01T01:20Z",
+    "prediction": {
+      "home_win_prob": 0.452,
+      "stat_model_prob": 0.277,
+      "kalshi_prob": 0.495,
+      "elo_prob": 1500.0,
+      "form_prob": 0.5
+    },
+    "outcome": null,
+    "verified": false
+  },
+  {
+    "game_id": "401772821",
+    "league": "nfl",
+    "timestamp": "2025-11-24T22:48:52.296765",
+    "home_team": "New England Patriots",
+    "away_team": "New York Giants",
+    "game_date": "2025-12-02T01:15Z",
+    "prediction": {
+      "home_win_prob": 0.671,
+      "stat_model_prob": 0.883,
+      "kalshi_prob": 0.505,
+      "elo_prob": 1500.0,
+      "form_prob": 0.5
+    },
+    "outcome": null,
+    "verified": false
+  },
+  {
+    "game_id": "401772947",
+    "league": "nfl",
+    "timestamp": "2025-11-24T22:48:52.296766",
+    "home_team": "Detroit Lions",
+    "away_team": "Dallas Cowboys",
+    "game_date": "2025-12-05T01:15Z",
+    "prediction": {
+      "home_win_prob": 0.585,
+      "stat_model_prob": 0.618,
+      "kalshi_prob": 0.58,
+      "elo_prob": 1500.0,
+      "form_prob": 0.5
+    },
+    "outcome": null,
+    "verified": false
+  },
+  {
+    "game_id": "401772900",
+    "league": "nfl",
+    "timestamp": "2025-11-24T22:48:52.296767",
+    "home_team": "Atlanta Falcons",
+    "away_team": "Seattle Seahawks",
+    "game_date": "2025-12-07T18:00Z",
+    "prediction": {
+      "home_win_prob": 0.527,
+      "stat_model_prob": 0.368,
+      "kalshi_prob": 0.57,
+      "elo_prob": 1500.0,
+      "form_prob": 0.5
+    },
+    "outcome": null,
+    "verified": false
+  },
+  {
+    "game_id": "401772902",
+    "league": "nfl",
+    "timestamp": "2025-11-24T22:48:52.296769",
+    "home_team": "Buffalo Bills",
+    "away_team": "Cincinnati Bengals",
+    "game_date": "2025-12-07T18:00Z",
+    "prediction": {
+      "home_win_prob": 0.644,
+      "stat_model_prob": 0.732,
+      "kalshi_prob": 0.65,
+      "elo_prob": 1500.0,
+      "form_prob": 0.5
+    },
+    "outcome": null,
+    "verified": false
+  },
+  {
+    "game_id": "401772898",
+    "league": "nfl",
+    "timestamp": "2025-11-24T22:48:52.296770",
+    "home_team": "Cleveland Browns",
+    "away_team": "Tennessee Titans",
+    "game_date": "2025-12-07T18:00Z",
+    "prediction": {
+      "home_win_prob": 0.445,
+      "stat_model_prob": 0.641,
+      "kalshi_prob": 0.29,
+      "elo_prob": 1500.0,
+      "form_prob": 0.5
+    },
+    "outcome": null,
+    "verified": false
+  },
+  {
+    "game_id": "401772899",
+    "league": "nfl",
+    "timestamp": "2025-11-24T22:48:52.296771",
+    "home_team": "Minnesota Vikings",
+    "away_team": "Washington Commanders",
+    "game_date": "2025-12-07T18:00Z",
+    "prediction": {
+      "home_win_prob": 0.38,
+      "stat_model_prob": 0.595,
+      "kalshi_prob": 0.18,
+      "elo_prob": 1500.0,
+      "form_prob": 0.5
+    },
+    "outcome": null,
+    "verified": false
+  },
+  {
+    "game_id": "401772790",
+    "league": "nfl",
+    "timestamp": "2025-11-24T22:48:52.296772",
+    "home_team": "New York Jets",
+    "away_team": "Miami Dolphins",
+    "game_date": "2025-12-07T18:00Z",
+    "prediction": {
+      "home_win_prob": 0.517,
+      "stat_model_prob": 0.459,
+      "kalshi_prob": 0.495,
+      "elo_prob": 1500.0,
+      "form_prob": 0.5
+    },
+    "outcome": null,
+    "verified": false
+  },
+  {
+    "game_id": "401772792",
+    "league": "nfl",
+    "timestamp": "2025-11-24T22:48:52.296773",
+    "home_team": "Tampa Bay Buccaneers",
+    "away_team": "New Orleans Saints",
+    "game_date": "2025-12-07T18:00Z",
+    "prediction": {
+      "home_win_prob": 0.609,
+      "stat_model_prob": 0.732,
+      "kalshi_prob": 0.58,
+      "elo_prob": 1500.0,
+      "form_prob": 0.5
+    },
+    "outcome": null,
+    "verified": false
+  },
+  {
+    "game_id": "401772793",
+    "league": "nfl",
+    "timestamp": "2025-11-24T22:48:52.296774",
+    "home_team": "Jacksonville Jaguars",
+    "away_team": "Indianapolis Colts",
+    "game_date": "2025-12-07T18:00Z",
+    "prediction": {
+      "home_win_prob": 0.651,
+      "stat_model_prob": 0.505,
+      "kalshi_prob": 0.76,
+      "elo_prob": 1500.0,
+      "form_prob": 0.5
+    },
+    "outcome": null,
+    "verified": false
+  },
+  {
+    "game_id": "401772791",
+    "league": "nfl",
+    "timestamp": "2025-11-24T22:48:52.296775",
+    "home_team": "Baltimore Ravens",
+    "away_team": "Pittsburgh Steelers",
+    "game_date": "2025-12-07T18:00Z",
+    "prediction": {
+      "home_win_prob": 0.645,
+      "stat_model_prob": 0.55,
+      "kalshi_prob": 0.73,
+      "elo_prob": 1500.0,
+      "form_prob": 0.5
+    },
+    "outcome": null,
+    "verified": false
+  },
+  {
+    "game_id": "401772794",
+    "league": "nfl",
+    "timestamp": "2025-11-24T22:48:52.296776",
+    "home_team": "Las Vegas Raiders",
+    "away_team": "Denver Broncos",
+    "game_date": "2025-12-07T21:05Z",
+    "prediction": {
+      "home_win_prob": 0.409,
+      "stat_model_prob": 0.232,
+      "kalshi_prob": 0.39,
+      "elo_prob": 1500.0,
+      "form_prob": 0.5
+    },
+    "outcome": null,
+    "verified": false
+  },
+  {
+    "game_id": "401772897",
+    "league": "nfl",
+    "timestamp": "2025-11-24T22:48:52.296777",
+    "home_team": "Green Bay Packers",
+    "away_team": "Chicago Bears",
+    "game_date": "2025-12-07T21:25Z",
+    "prediction": {
+      "home_win_prob": 0.547,
+      "stat_model_prob": 0.436,
+      "kalshi_prob": 0.58,
+      "elo_prob": 1500.0,
+      "form_prob": 0.5
+    },
+    "outcome": null,
+    "verified": false
+  },
+  {
+    "game_id": "401772901",
+    "league": "nfl",
+    "timestamp": "2025-11-24T22:48:52.296778",
+    "home_team": "Arizona Cardinals",
+    "away_team": "Los Angeles Rams",
+    "game_date": "2025-12-07T21:25Z",
+    "prediction": {
+      "home_win_prob": 0.433,
+      "stat_model_prob": 0.277,
+      "kalshi_prob": 0.42,
+      "elo_prob": 1500.0,
+      "form_prob": 0.5
+    },
+    "outcome": null,
+    "verified": false
+  },
+  {
+    "game_id": "401772932",
+    "league": "nfl",
+    "timestamp": "2025-11-24T22:48:52.296779",
+    "home_team": "Kansas City Chiefs",
+    "away_team": "Houston Texans",
+    "game_date": "2025-12-08T01:20Z",
+    "prediction": {
+      "home_win_prob": 0.475,
+      "stat_model_prob": 0.55,
+      "kalshi_prob": 0.39,
+      "elo_prob": 1500.0,
+      "form_prob": 0.5
+    },
+    "outcome": null,
+    "verified": false
+  }
+]

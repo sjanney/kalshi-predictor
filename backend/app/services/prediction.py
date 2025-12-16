@@ -1,6 +1,13 @@
+"""
+Legacy Prediction Engine.
+DEPRECATED: Use EnhancedPredictionEngine (enhanced_prediction.py) for new development.
+Maintained for backward compatibility.
+"""
 from typing import Dict, List, Optional
 import pandas as pd
 from datetime import datetime
+from app.services.enhanced_signals import EnhancedSignalEngine
+from app.services.data_feeds import DataFeeds
 
 class PredictionEngine:
     def __init__(self):
@@ -11,6 +18,9 @@ class PredictionEngine:
         
         # Home court advantage (approx 3-4 points or 5-10% win prob boost)
         self.HOME_ADVANTAGE_ELO = 100
+        
+        self.signal_engine = EnhancedSignalEngine()
+        self.data_feeds = DataFeeds()
         
     def calculate_elo_win_prob(self, home_elo: float, away_elo: float) -> float:
         """
@@ -77,7 +87,8 @@ class PredictionEngine:
         # Placeholder logic
         return "MEDIUM"
 
-    def generate_prediction(self, game: Dict, home_stats: Dict, away_stats: Dict, kalshi_markets: Optional[Dict]) -> Dict:
+    def generate_prediction(self, game: Dict, home_stats: Dict, away_stats: Dict, 
+                           kalshi_markets: Optional[Dict], include_intelligence: bool = True) -> Dict:
         """
         Generate a comprehensive prediction for a game using 2.0 logic.
         kalshi_markets is now a dict containing potentially 'home_market' and 'away_market'.
@@ -107,6 +118,7 @@ class PredictionEngine:
         volume = 0
         yes_bid = 0
         yes_ask = 100
+        spread = 15
         
         # Extract probabilities from the matched market structure
         if kalshi_markets:
@@ -197,8 +209,69 @@ class PredictionEngine:
             else:
                 recommendation = "Lean Model"
 
+        # 4. Advanced Analytics & Reasoning
+        
+        # Feature contributions (approximate for display)
+        record_diff = home_win_pct - away_win_pct
+        model_features = {
+            "home_advantage": 0.05,
+            "record_diff": round(record_diff / 2, 3),
+            "recent_form": 0.0  # Placeholder
+        }
+
+        # Market pressure (0-100 scale)
+        market_pressure = min(100, int((volume / 1000) * 20 + (15 - min(15, spread)) * 3))
+        
+        # Generate context and signals
+        context = self.data_feeds.get_market_context(
+            game.get('home_team_abbrev'),
+            game.get('away_team_abbrev'),
+            game.get('game_date'),
+            game.get('league', 'nba'),
+            include_intelligence=include_intelligence
+        )
+        
+        market_data_for_signals = {
+            'volume_24h': volume,
+            'last_price': kalshi_price
+        }
+        
+        signals = self.signal_engine.generate_signals(game, market_data_for_signals, context)
+        
+        # Reasoning generation
+        reasoning = []
+        if divergence > 0.15:
+            reasoning.append(f"Significant divergence ({int(divergence*100)}%) between model and market suggests a potential edge.")
+        
+        if kalshi_confidence == "HIGH":
+            reasoning.append("High market liquidity indicates sharp money is active.")
+        elif kalshi_confidence == "LOW":
+            reasoning.append("Low market volume warrants caution despite model signal.")
+
+        if home_win_pct > away_win_pct + 0.2:
+            reasoning.append(f"Home team has a dominant record advantage.")
+        elif away_win_pct > home_win_pct + 0.2:
+            reasoning.append(f"Away team is significantly outperforming on the season.")
+
+        if kalshi_trend == "UP":
+            reasoning.append("Market sentiment is trending towards the Home team.")
+
+        # Append signals to reasoning
+        for sig in signals:
+            reasoning.append(f"{sig['type']}: {sig['description']}")
+
+        analytics = {
+            "volatility_score": self.calculate_volatility({}, {}), # Reuse for now
+            "stat_divergence": round(divergence, 2),
+            "market_pressure": market_pressure,
+            "model_features": model_features,
+            "reasoning": reasoning,
+            "signals": signals
+        }
+
         return {
             "game_id": game.get('game_id'),
+            "league": game.get('league', 'nba'),
             "home_team": game.get('home_team_name'),
             "away_team": game.get('away_team_name'),
             "home_abbr": game.get('home_team_abbrev'),
@@ -217,6 +290,7 @@ class PredictionEngine:
                 "divergence": round(divergence, 2),
                 "volatility": self.calculate_volatility({}, {})
             },
+            "analytics": analytics,
             "factors": {
                 "home_record": home_record,
                 "away_record": away_record,

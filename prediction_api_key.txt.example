@@ -1,0 +1,19 @@
+-----BEGIN RSA PRIVATE KEY-----
+PASTE YOUR KALSHI API PRIVATE KEY HERE
+
+To get your private key:
+1. Log in to your Kalshi account at https://kalshi.com
+2. Go to Settings > API
+3. Generate a new API key pair
+4. Copy the private key and paste it here (replacing this text)
+
+The key should look like:
+MIIEogIBAAKCAQEA...
+...many lines of base64 characters...
+...ending with...=
+-----END RSA PRIVATE KEY-----
+
+After pasting your key:
+1. Rename this file to: prediction_api_key.txt
+2. Restart the application
+-----END RSA PRIVATE KEY-----
