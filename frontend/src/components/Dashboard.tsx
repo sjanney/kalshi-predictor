@@ -1,4 +1,4 @@
-import React, { useState, useCallback, lazy, Suspense } from 'react';
+import React, { useState, useCallback, lazy, Suspense, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { type Game, type League } from '../lib/api';
 import { useFilterStore } from '../lib/store';
@@ -7,20 +7,21 @@ import GameCard from './GameCard';
 import MarketTicker from './MarketTicker';
 import InsightsPanel from './charts/InsightsPanel';
 import AccuracyPanel from './AccuracyPanel';
+import LicenseInfoModal from './LicenseInfoModal';
 import {
     RefreshCw, Zap, Filter, BarChart3, AlertTriangle,
     X, CheckCircle, LayoutDashboard,
-    Calculator, Map, Activity
+    Calculator, Map, Activity, Shield, AlertCircle, Calendar, DollarSign
 } from 'lucide-react';
 import { cn } from './ui/shared';
 import { GameCardSkeleton, InsightsPanelSkeleton, GameAnalyticsModalSkeleton } from './ui/skeletons';
-import { ResponsiveContainer, ScatterChart, Scatter, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, ZAxis, Cell } from 'recharts';
 
 // Lazy load heavy components
 const GameAnalyticsModal = lazy(() => import('./GameAnalyticsModal'));
 const StrategyLab = lazy(() => import('./StrategyLab'));
 const HelpGuide = lazy(() => import('./HelpGuide'));
 const LiveMarketsTab = lazy(() => import('./LiveMarketsTab'));
+const TradingTerminal = lazy(() => import('./TradingTerminal'));
 
 // --- Modals (Extracted from Legacy) ---
 interface MarketHeatmapModalProps {
@@ -33,11 +34,14 @@ const MarketHeatmapModal: React.FC<MarketHeatmapModalProps> = ({ open, onClose, 
     const safeGames = games ?? [];
     const heatmapData = safeGames.map((game) => ({
         name: `${game.away_abbr} @ ${game.home_abbr}`,
+        fullName: `${game.away_team} @ ${game.home_team}`,
         volume: game.market_data?.volume ?? 0,
         divergence: Math.abs((game.prediction?.divergence ?? 0) * 100),
         confidence: game.prediction?.confidence_score ?? 'LOW',
         price: ((game.market_data?.price ?? game.prediction?.home_kalshi_prob ?? 0) * 100),
-    }));
+        recommendation: game.prediction?.recommendation ?? 'Neutral',
+        signalStrength: game.prediction?.signal_strength ?? 'WEAK',
+    })).sort((a, b) => b.divergence - a.divergence); // Sort by edge descending
 
     const confidenceColor = (confidence: Game['prediction']['confidence_score']) => {
         switch (confidence) {
@@ -47,59 +51,131 @@ const MarketHeatmapModal: React.FC<MarketHeatmapModalProps> = ({ open, onClose, 
         }
     };
 
+    const signalBadge = (strength: string) => {
+        const colors = {
+            'STRONG': 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30',
+            'MODERATE': 'bg-yellow-500/20 text-yellow-400 border-yellow-500/30',
+            'WEAK': 'bg-zinc-500/20 text-zinc-400 border-zinc-500/30',
+        };
+        return colors[strength as keyof typeof colors] || colors.WEAK;
+    };
+
     return (
         <AnimatePresence>
             {open && (
                 <motion.div
-                    className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-md p-4"
                     initial={{ opacity: 0 }}
                     animate={{ opacity: 1 }}
                     exit={{ opacity: 0 }}
+                    className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-50 p-4"
+                    onClick={onClose}
                 >
                     <motion.div
-                        className="glass-panel rounded-2xl w-full max-w-5xl p-6 relative"
                         initial={{ scale: 0.9, opacity: 0 }}
                         animate={{ scale: 1, opacity: 1 }}
                         exit={{ scale: 0.9, opacity: 0 }}
+                        onClick={(e) => e.stopPropagation()}
+                        className="glass-panel p-6 rounded-2xl max-w-6xl w-full max-h-[90vh] overflow-y-auto"
                     >
                         <button onClick={onClose} className="absolute top-4 right-4 text-zinc-500 hover:text-white transition-colors">
                             <X size={18} />
                         </button>
-                        <div className="mb-4">
-                            <h3 className="text-xl font-bold text-white flex items-center gap-2">
-                                <Map className="text-primary" size={20} /> Market Heat Map
+
+                        <div className="mb-6">
+                            <h3 className="text-2xl font-bold text-white flex items-center gap-3 mb-2">
+                                <div className="p-2 bg-gradient-to-br from-primary/20 to-primary/5 rounded-lg">
+                                    <Map className="text-primary" size={24} />
+                                </div>
+                                Market Opportunities
                             </h3>
-                            <p className="text-sm text-zinc-400">Volume vs. Edge. Bubble size = Price.</p>
+                            <p className="text-sm text-zinc-400">Top betting edges ranked by model divergence from market prices</p>
                         </div>
-                        <div className="h-[420px] w-full">
-                            <ResponsiveContainer width="100%" height="100%">
-                                <ScatterChart margin={{ top: 20, right: 20, bottom: 20, left: 0 }}>
-                                    <CartesianGrid stroke="#333" vertical={false} strokeDasharray="3 3" />
-                                    <XAxis type="number" dataKey="volume" name="Volume" tick={{ fill: '#888' }} stroke="#444" tickFormatter={(val) => `$${(val / 1000).toFixed(0)}k`} />
-                                    <YAxis type="number" dataKey="divergence" name="Edge" stroke="#444" tick={{ fill: '#888' }} unit="%" />
-                                    <ZAxis dataKey="price" range={[80, 400]} name="Price" />
-                                    <RechartsTooltip
-                                        content={({ active, payload }) => {
-                                            if (!active || !payload || payload.length === 0) return null;
-                                            const data = payload[0].payload;
-                                            return (
-                                                <div className="glass-panel p-3 text-xs text-zinc-300 rounded-lg">
-                                                    <p className="font-bold text-white mb-1">{data.name}</p>
-                                                    <p>Vol: <span className="text-primary">${data.volume.toLocaleString()}</span></p>
-                                                    <p>Edge: <span className="text-secondary">{data.divergence.toFixed(1)}%</span></p>
-                                                    <p>Conf: <span style={{ color: confidenceColor(data.confidence) }}>{data.confidence}</span></p>
+
+                        {heatmapData.length === 0 ? (
+                            <div className="text-center py-12">
+                                <p className="text-zinc-500">No market data available</p>
+                            </div>
+                        ) : (
+                            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                                {heatmapData.map((game, index) => (
+                                    <motion.div
+                                        key={index}
+                                        initial={{ opacity: 0, y: 20 }}
+                                        animate={{ opacity: 1, y: 0 }}
+                                        transition={{ delay: index * 0.05 }}
+                                        className="relative group"
+                                    >
+                                        <div className="absolute inset-0 bg-gradient-to-br from-primary/10 to-secondary/10 rounded-xl blur opacity-0 group-hover:opacity-100 transition-opacity" />
+                                        <div className="relative bg-zinc-900/50 border border-white/5 rounded-xl p-4 hover:border-primary/30 transition-all">
+                                            {/* Rank Badge */}
+                                            <div className="absolute -top-2 -left-2 w-8 h-8 bg-gradient-to-br from-primary to-secondary rounded-full flex items-center justify-center text-xs font-bold text-white shadow-lg">
+                                                #{index + 1}
+                                            </div>
+
+                                            {/* Game Info */}
+                                            <div className="mb-3 pt-2">
+                                                <h4 className="text-white font-bold text-sm mb-1">{game.name}</h4>
+                                                <p className="text-xs text-zinc-500">{game.fullName}</p>
+                                            </div>
+
+                                            {/* Key Metrics */}
+                                            <div className="space-y-2 mb-3">
+                                                {/* Edge */}
+                                                <div className="flex justify-between items-center">
+                                                    <span className="text-xs text-zinc-400">Edge</span>
+                                                    <div className="flex items-center gap-2">
+                                                        <div className="h-1.5 w-16 bg-zinc-800 rounded-full overflow-hidden">
+                                                            <div
+                                                                className="h-full bg-gradient-to-r from-primary to-secondary rounded-full"
+                                                                style={{ width: `${Math.min(game.divergence * 5, 100)}%` }}
+                                                            />
+                                                        </div>
+                                                        <span className="text-sm font-bold text-primary">{game.divergence.toFixed(1)}%</span>
+                                                    </div>
                                                 </div>
-                                            );
-                                        }}
-                                    />
-                                    <Scatter data={heatmapData}>
-                                        {heatmapData.map((entry, index) => (
-                                            <Cell key={`cell-${index}`} fill={confidenceColor(entry.confidence)} />
-                                        ))}
-                                    </Scatter>
-                                </ScatterChart>
-                            </ResponsiveContainer>
-                        </div>
+
+                                                {/* Volume */}
+                                                <div className="flex justify-between items-center">
+                                                    <span className="text-xs text-zinc-400">Volume</span>
+                                                    <span className="text-sm font-medium text-white">${(game.volume / 1000).toFixed(1)}k</span>
+                                                </div>
+
+                                                {/* Price */}
+                                                <div className="flex justify-between items-center">
+                                                    <span className="text-xs text-zinc-400">Market Price</span>
+                                                    <span className="text-sm font-medium text-white">{game.price.toFixed(0)}¢</span>
+                                                </div>
+                                            </div>
+
+                                            {/* Badges */}
+                                            <div className="flex gap-2 flex-wrap">
+                                                <span
+                                                    className={`px-2 py-0.5 rounded text-xs font-medium border ${signalBadge(game.signalStrength)}`}
+                                                >
+                                                    {game.signalStrength}
+                                                </span>
+                                                <span
+                                                    className="px-2 py-0.5 rounded text-xs font-medium border"
+                                                    style={{
+                                                        backgroundColor: `${confidenceColor(game.confidence)}20`,
+                                                        borderColor: `${confidenceColor(game.confidence)}40`,
+                                                        color: confidenceColor(game.confidence)
+                                                    }}
+                                                >
+                                                    {game.confidence}
+                                                </span>
+                                            </div>
+
+                                            {/* Recommendation */}
+                                            <div className="mt-3 pt-3 border-t border-white/5">
+                                                <p className="text-xs text-zinc-400 mb-1">Recommendation</p>
+                                                <p className="text-sm font-medium text-white">{game.recommendation}</p>
+                                            </div>
+                                        </div>
+                                    </motion.div>
+                                ))}
+                            </div>
+                        )}
                     </motion.div>
                 </motion.div>
             )}
@@ -110,19 +186,76 @@ const MarketHeatmapModal: React.FC<MarketHeatmapModalProps> = ({ open, onClose, 
 interface RiskCalculatorModalProps {
     open: boolean;
     onClose: () => void;
+    games: Game[];
 }
 
-const RiskCalculatorModal: React.FC<RiskCalculatorModalProps> = ({ open, onClose }) => {
+const RiskCalculatorModal: React.FC<RiskCalculatorModalProps> = ({ open, onClose, games }) => {
     const [bankroll, setBankroll] = useState(5000);
-    const [winProbability, setWinProbability] = useState(60);
-    const [marketPrice, setMarketPrice] = useState(48);
+    const [kellyMultiplier, setKellyMultiplier] = useState(1.0);
+    const [selectedGames, setSelectedGames] = useState<Set<string>>(new Set());
+    const [animatedTotalKelly, setAnimatedTotalKelly] = useState(0);
+    const [animatedTotalBet, setAnimatedTotalBet] = useState(0);
+    const [animatedExpectedReturn, setAnimatedExpectedReturn] = useState(0);
 
-    const p = Math.min(Math.max(winProbability / 100, 0.01), 0.99);
-    const price = Math.min(Math.max(marketPrice / 100, 0.01), 0.99);
-    const q = 1 - p;
-    const b = (1 - price) / price;
-    const kellyFraction = Math.max((b * p - q) / b, 0);
-    const maxStake = bankroll * kellyFraction;
+    // Calculate Kelly for each selected game
+    const portfolioGames = games.filter(g => selectedGames.has(g.game_id)).map(game => {
+        const p = game.prediction.stat_model_prob;
+        const price = (game.market_data?.price ?? 50) / 100;
+        const q = 1 - p;
+        const b = (1 - price) / price;
+        const rawKelly = Math.max((b * p - q) / b, 0);
+        const kellyFraction = rawKelly * kellyMultiplier;
+        const edge = p - price;
+
+        return {
+            game,
+            kellyFraction,
+            edge,
+            recommendedBet: bankroll * kellyFraction,
+            expectedValue: edge * bankroll * kellyFraction
+        };
+    });
+
+    const totalKellyFraction = portfolioGames.reduce((sum, g) => sum + g.kellyFraction, 0);
+    const totalRecommendedBet = portfolioGames.reduce((sum, g) => sum + g.recommendedBet, 0);
+    const totalExpectedValue = portfolioGames.reduce((sum, g) => sum + g.expectedValue, 0);
+    const totalEdge = portfolioGames.length > 0 ? totalExpectedValue / totalRecommendedBet : 0;
+
+    // Animate numbers
+    useEffect(() => {
+        const duration = 500;
+        const steps = 20;
+        const kellyStep = (totalKellyFraction * 100 - animatedTotalKelly) / steps;
+        const betStep = (totalRecommendedBet - animatedTotalBet) / steps;
+        const evStep = (totalExpectedValue - animatedExpectedReturn) / steps;
+
+        let currentStep = 0;
+        const interval = setInterval(() => {
+            currentStep++;
+            setAnimatedTotalKelly(prev => prev + kellyStep);
+            setAnimatedTotalBet(prev => prev + betStep);
+            setAnimatedExpectedReturn(prev => prev + evStep);
+
+            if (currentStep >= steps) {
+                clearInterval(interval);
+                setAnimatedTotalKelly(totalKellyFraction * 100);
+                setAnimatedTotalBet(totalRecommendedBet);
+                setAnimatedExpectedReturn(totalExpectedValue);
+            }
+        }, duration / steps);
+
+        return () => clearInterval(interval);
+    }, [totalKellyFraction, totalRecommendedBet, totalExpectedValue]);
+
+    const toggleGame = (gameId: string) => {
+        const newSelected = new Set(selectedGames);
+        if (newSelected.has(gameId)) {
+            newSelected.delete(gameId);
+        } else {
+            newSelected.add(gameId);
+        }
+        setSelectedGames(newSelected);
+    };
 
     return (
         <AnimatePresence>
@@ -132,45 +265,304 @@ const RiskCalculatorModal: React.FC<RiskCalculatorModalProps> = ({ open, onClose
                     initial={{ opacity: 0 }}
                     animate={{ opacity: 1 }}
                     exit={{ opacity: 0 }}
+                    onClick={onClose}
                 >
                     <motion.div
-                        className="glass-panel rounded-2xl w-full max-w-xl p-6 relative"
-                        initial={{ scale: 0.92, opacity: 0 }}
-                        animate={{ scale: 1, opacity: 1 }}
-                        exit={{ scale: 0.92, opacity: 0 }}
+                        className="glass-panel rounded-3xl w-full max-w-6xl h-[90vh] flex flex-col p-8 relative overflow-hidden"
+                        initial={{ scale: 0.9, opacity: 0, y: 20 }}
+                        animate={{ scale: 1, opacity: 1, y: 0 }}
+                        exit={{ scale: 0.9, opacity: 0, y: 20 }}
+                        transition={{ type: "spring", damping: 25 }}
+                        onClick={(e) => e.stopPropagation()}
                     >
-                        <button onClick={onClose} className="absolute top-4 right-4 text-zinc-500 hover:text-white">
-                            <X size={18} />
-                        </button>
-                        <h3 className="text-xl font-bold text-white mb-4 flex items-center gap-2">
-                            <Calculator className="text-secondary" size={20} /> Kelly Calculator
-                        </h3>
+                        {/* Background Gradient */}
+                        <div className="absolute top-0 right-0 w-96 h-96 bg-gradient-to-br from-secondary/10 to-transparent rounded-full blur-3xl" />
 
-                        <div className="space-y-4">
-                            <div>
-                                <label className="text-xs text-zinc-400 uppercase">Bankroll</label>
-                                <input type="number" value={bankroll} onChange={e => setBankroll(Number(e.target.value))} className="w-full bg-black/20 border border-white/10 rounded p-2 text-white" />
+                        <button onClick={onClose} className="absolute top-6 right-6 text-zinc-500 hover:text-white transition-colors z-10">
+                            <X size={20} />
+                        </button>
+
+                        <div className="relative flex-1 flex flex-col overflow-hidden">
+                            {/* Header */}
+                            <div className="flex items-center justify-between mb-6">
+                                <div className="flex items-center gap-3">
+                                    <div className="p-3 bg-gradient-to-br from-secondary/20 to-secondary/5 rounded-xl">
+                                        <Calculator className="text-secondary" size={28} />
+                                    </div>
+                                    <div>
+                                        <h3 className="text-2xl font-bold text-white">Portfolio Kelly Calculator</h3>
+                                        <p className="text-sm text-zinc-400">Select games to calculate optimal bet sizing</p>
+                                    </div>
+                                </div>
+
+                                <div className="flex items-center gap-6">
+                                    {/* Kelly Multiplier Slider */}
+                                    <div className="bg-zinc-900/50 border border-zinc-800 rounded-xl p-4 w-64">
+                                        <div className="flex justify-between items-center mb-2">
+                                            <label className="text-xs font-bold text-zinc-500 uppercase tracking-widest">
+                                                Kelly Fraction
+                                            </label>
+                                            <span className="text-xs font-mono font-bold text-secondary">
+                                                {kellyMultiplier.toFixed(2)}x
+                                            </span>
+                                        </div>
+                                        <input
+                                            type="range"
+                                            min="0.1"
+                                            max="1.0"
+                                            step="0.05"
+                                            value={kellyMultiplier}
+                                            onChange={(e) => setKellyMultiplier(Number(e.target.value))}
+                                            className="w-full accent-secondary"
+                                        />
+                                    </div>
+
+                                    {/* Bankroll Input */}
+                                    <div className="bg-zinc-900/50 border border-zinc-800 rounded-xl p-4">
+                                        <label className="text-xs font-bold text-zinc-500 uppercase tracking-widest mb-2 block">
+                                            Total Bankroll
+                                        </label>
+                                        <div className="relative">
+                                            <span className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500 text-lg">$</span>
+                                            <input
+                                                type="number"
+                                                value={bankroll}
+                                                onChange={e => setBankroll(Number(e.target.value))}
+                                                className="w-40 bg-zinc-800 border border-zinc-700 rounded-lg pl-7 pr-3 py-2 text-white text-xl font-bold focus:outline-none focus:ring-2 focus:ring-secondary/50"
+                                            />
+                                        </div>
+                                    </div>
+                                </div>
                             </div>
-                            <div className="grid grid-cols-2 gap-4">
-                                <div>
-                                    <label className="text-xs text-zinc-400 uppercase">Win Prob (%)</label>
-                                    <input type="number" value={winProbability} onChange={e => setWinProbability(Number(e.target.value))} className="w-full bg-black/20 border border-white/10 rounded p-2 text-white" />
+
+                            {/* Portfolio Summary */}
+                            {selectedGames.size > 0 && (
+                                <motion.div
+                                    className="grid grid-cols-4 gap-4 mb-6"
+                                    initial={{ opacity: 0, y: -20 }}
+                                    animate={{ opacity: 1, y: 0 }}
+                                >
+                                    <div className="bg-gradient-to-br from-blue-500/10 to-blue-600/5 border border-blue-500/20 rounded-xl p-4">
+                                        <div className="text-xs text-blue-400 uppercase tracking-widest mb-1 font-bold">Selected</div>
+                                        <div className="text-3xl font-bold text-white">{selectedGames.size}</div>
+                                        <div className="text-xs text-zinc-500">games</div>
+                                    </div>
+
+                                    <div className="bg-gradient-to-br from-secondary/10 to-secondary/5 border border-secondary/20 rounded-xl p-4">
+                                        <div className="text-xs text-secondary uppercase tracking-widest mb-1 font-bold">Total Kelly</div>
+                                        <div className="text-3xl font-bold text-white">{animatedTotalKelly.toFixed(1)}%</div>
+                                        <div className="text-xs text-zinc-500">of bankroll</div>
+                                    </div>
+
+                                    <div className="bg-gradient-to-br from-emerald-500/10 to-emerald-600/5 border border-emerald-500/20 rounded-xl p-4">
+                                        <div className="text-xs text-emerald-400 uppercase tracking-widest mb-1 font-bold">Total Bet</div>
+                                        <div className="text-3xl font-bold text-emerald-400">${animatedTotalBet.toFixed(0)}</div>
+                                        <div className="text-xs text-zinc-500">recommended</div>
+                                    </div>
+
+                                    <div className={cn(
+                                        "bg-gradient-to-br border rounded-xl p-4",
+                                        totalExpectedValue >= 0
+                                            ? "from-purple-500/10 to-purple-600/5 border-purple-500/20"
+                                            : "from-rose-500/10 to-rose-600/5 border-rose-500/20"
+                                    )}>
+                                        <div className={cn(
+                                            "text-xs uppercase tracking-widest mb-1 font-bold",
+                                            totalExpectedValue >= 0 ? "text-purple-400" : "text-rose-400"
+                                        )}>Expected Value</div>
+                                        <div className={cn(
+                                            "text-3xl font-bold",
+                                            totalExpectedValue >= 0 ? "text-purple-400" : "text-rose-400"
+                                        )}>
+                                            {totalExpectedValue >= 0 ? '+' : ''}${animatedExpectedReturn.toFixed(0)}
+                                        </div>
+                                        <div className="text-xs text-zinc-500">
+                                            {totalEdge >= 0 ? '+' : ''}{(totalEdge * 100).toFixed(1)}% edge
+                                        </div>
+                                    </div>
+                                </motion.div>
+                            )}
+
+                            {/* Game Selection Grid */}
+                            <div className="flex-1 overflow-hidden flex flex-col">
+                                <div className="flex items-center justify-between mb-4">
+                                    <h4 className="text-sm font-bold text-zinc-400 uppercase tracking-wider">
+                                        Available Games ({games.length})
+                                    </h4>
+                                    <div className="flex gap-2">
+                                        <button
+                                            onClick={() => setSelectedGames(new Set(games.map(g => g.game_id)))}
+                                            className="text-xs px-3 py-1.5 bg-zinc-800 hover:bg-zinc-700 rounded-lg text-zinc-300 transition-colors"
+                                        >
+                                            Select All
+                                        </button>
+                                        <button
+                                            onClick={() => setSelectedGames(new Set())}
+                                            className="text-xs px-3 py-1.5 bg-zinc-800 hover:bg-zinc-700 rounded-lg text-zinc-300 transition-colors"
+                                        >
+                                            Clear All
+                                        </button>
+                                    </div>
                                 </div>
-                                <div>
-                                    <label className="text-xs text-zinc-400 uppercase">Market Price (¢)</label>
-                                    <input type="number" value={marketPrice} onChange={e => setMarketPrice(Number(e.target.value))} className="w-full bg-black/20 border border-white/10 rounded p-2 text-white" />
+
+                                <div className="flex-1 overflow-y-auto grid grid-cols-2 gap-3 pr-2">
+                                    {games.map((game, index) => {
+                                        const isSelected = selectedGames.has(game.game_id);
+                                        const p = game.prediction.stat_model_prob;
+                                        const price = (game.market_data?.price ?? 50) / 100;
+                                        const edge = p - price;
+                                        const hasEdge = edge > 0;
+
+                                        return (
+                                            <motion.div
+                                                key={game.game_id}
+                                                initial={{ opacity: 0, y: 20 }}
+                                                animate={{ opacity: 1, y: 0 }}
+                                                transition={{ delay: index * 0.02 }}
+                                                onClick={() => toggleGame(game.game_id)}
+                                                className={cn(
+                                                    "relative p-4 rounded-xl border-2 cursor-pointer transition-all group",
+                                                    isSelected
+                                                        ? "border-emerald-500 bg-emerald-500/10 shadow-lg shadow-emerald-500/20"
+                                                        : "border-zinc-800 bg-zinc-900/30 hover:border-zinc-700 hover:bg-zinc-800/50"
+                                                )}
+                                            >
+                                                {/* Selection Indicator */}
+                                                <div className={cn(
+                                                    "absolute top-3 right-3 w-5 h-5 rounded-full border-2 flex items-center justify-center transition-all",
+                                                    isSelected
+                                                        ? "border-emerald-500 bg-emerald-500"
+                                                        : "border-zinc-600 bg-transparent group-hover:border-zinc-500"
+                                                )}>
+                                                    {isSelected && (
+                                                        <motion.svg
+                                                            className="w-3 h-3 text-white"
+                                                            fill="none"
+                                                            viewBox="0 0 24 24"
+                                                            stroke="currentColor"
+                                                            initial={{ scale: 0 }}
+                                                            animate={{ scale: 1 }}
+                                                        >
+                                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
+                                                        </motion.svg>
+                                                    )}
+                                                </div>
+
+                                                {/* Game Info */}
+                                                <div className="mb-3 pr-8">
+                                                    <div className="text-sm font-bold text-white mb-1">
+                                                        {game.away_abbr} @ {game.home_abbr}
+                                                    </div>
+                                                    <div className="text-xs text-zinc-500">
+                                                        {game.away_team} @ {game.home_team}
+                                                    </div>
+                                                </div>
+
+                                                {/* Metrics */}
+                                                <div className="grid grid-cols-3 gap-2 text-xs">
+                                                    <div>
+                                                        <div className="text-zinc-500 mb-1">Edge</div>
+                                                        <div className={cn(
+                                                            "font-bold",
+                                                            hasEdge ? "text-emerald-400" : "text-rose-400"
+                                                        )}>
+                                                            {hasEdge ? '+' : ''}{(edge * 100).toFixed(1)}%
+                                                        </div>
+                                                    </div>
+                                                    <div>
+                                                        <div className="text-zinc-500 mb-1">Model</div>
+                                                        <div className="font-bold text-white">
+                                                            {(p * 100).toFixed(0)}%
+                                                        </div>
+                                                    </div>
+                                                    <div>
+                                                        <div className="text-zinc-500 mb-1">Market</div>
+                                                        <div className="font-bold text-white">
+                                                            {(price * 100).toFixed(0)}¢
+                                                        </div>
+                                                    </div>
+                                                </div>
+
+                                                {/* Confidence Badge */}
+                                                <div className="mt-3">
+                                                    <span className={cn(
+                                                        "px-2 py-1 rounded text-xs font-bold",
+                                                        game.prediction.confidence_score === 'HIGH' ? "bg-emerald-500/20 text-emerald-400 border border-emerald-500/30" :
+                                                            game.prediction.confidence_score === 'MEDIUM' ? "bg-amber-500/20 text-amber-400 border border-amber-500/30" :
+                                                                "bg-zinc-500/20 text-zinc-400 border border-zinc-500/30"
+                                                    )}>
+                                                        {game.prediction.confidence_score}
+                                                    </span>
+                                                </div>
+                                            </motion.div>
+                                        );
+                                    })}
                                 </div>
                             </div>
-                            <div className="p-4 bg-white/5 rounded-lg border border-white/10 mt-4">
-                                <div className="flex justify-between items-center mb-2">
-                                    <span className="text-zinc-400">Kelly Stake</span>
-                                    <span className="text-xl font-bold text-primary">{(kellyFraction * 100).toFixed(1)}%</span>
-                                </div>
-                                <div className="flex justify-between items-center">
-                                    <span className="text-zinc-400">Max Bet</span>
-                                    <span className="text-xl font-bold text-white">${maxStake.toFixed(0)}</span>
-                                </div>
-                            </div>
+
+                            {/* Selected Games Breakdown */}
+                            {selectedGames.size > 0 && (
+                                <motion.div
+                                    className="mt-6 bg-zinc-900/40 border border-zinc-800 rounded-2xl overflow-hidden"
+                                    initial={{ opacity: 0, y: 20 }}
+                                    animate={{ opacity: 1, y: 0 }}
+                                >
+                                    <div className="p-4 bg-zinc-900/80 border-b border-zinc-800 flex items-center justify-between">
+                                        <span className="text-sm font-bold text-white uppercase tracking-wider">
+                                            Recommended Bets
+                                        </span>
+                                        <span className="text-xs text-zinc-500">
+                                            {selectedGames.size} positions
+                                        </span>
+                                    </div>
+                                    <div className="max-h-48 overflow-y-auto">
+                                        <table className="w-full text-left text-sm">
+                                            <thead className="text-xs text-zinc-600 bg-zinc-900/50 sticky top-0">
+                                                <tr>
+                                                    <th className="p-3">Game</th>
+                                                    <th className="p-3">Edge</th>
+                                                    <th className="p-3">Kelly %</th>
+                                                    <th className="p-3 text-right">Bet Size</th>
+                                                    <th className="p-3 text-right">Expected Value</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody className="divide-y divide-zinc-800/50">
+                                                {portfolioGames.map((pg, index) => (
+                                                    <motion.tr
+                                                        key={pg.game.game_id}
+                                                        className="hover:bg-zinc-800/30"
+                                                        initial={{ opacity: 0, x: -20 }}
+                                                        animate={{ opacity: 1, x: 0 }}
+                                                        transition={{ delay: index * 0.05 }}
+                                                    >
+                                                        <td className="p-3 font-medium text-white">
+                                                            {pg.game.away_abbr} @ {pg.game.home_abbr}
+                                                        </td>
+                                                        <td className={cn(
+                                                            "p-3 font-mono font-bold",
+                                                            pg.edge >= 0 ? "text-emerald-400" : "text-rose-400"
+                                                        )}>
+                                                            {pg.edge >= 0 ? '+' : ''}{(pg.edge * 100).toFixed(1)}%
+                                                        </td>
+                                                        <td className="p-3 font-mono text-secondary">
+                                                            {(pg.kellyFraction * 100).toFixed(1)}%
+                                                        </td>
+                                                        <td className="p-3 text-right font-mono font-bold text-white">
+                                                            ${pg.recommendedBet.toFixed(0)}
+                                                        </td>
+                                                        <td className={cn(
+                                                            "p-3 text-right font-mono font-bold",
+                                                            pg.expectedValue >= 0 ? "text-emerald-400" : "text-rose-400"
+                                                        )}>
+                                                            {pg.expectedValue >= 0 ? '+' : ''}${pg.expectedValue.toFixed(2)}
+                                                        </td>
+                                                    </motion.tr>
+                                                ))}
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                </motion.div>
+                            )}
                         </div>
                     </motion.div>
                 </motion.div>
@@ -178,6 +570,8 @@ const RiskCalculatorModal: React.FC<RiskCalculatorModalProps> = ({ open, onClose
         </AnimatePresence>
     );
 };
+
+
 
 // --- Main Dashboard Component ---
 
@@ -196,14 +590,30 @@ const Dashboard: React.FC = () => {
     const [showRiskCalc, setShowRiskCalc] = useState(false);
     const [showStrategyLab, setShowStrategyLab] = useState(false);
     const [showHelpGuide, setShowHelpGuide] = useState(false);
-    const [activeTab, setActiveTab] = useState<'games' | 'live'>('games');
+    const [showLicenseInfo, setShowLicenseInfo] = useState(false);
+    const [activeTab, setActiveTab] = useState<'upcoming' | 'live_games' | 'completed' | 'market_feed' | 'trading_desk'>('upcoming');
 
     // Filter Logic
     const filteredGames = React.useMemo(() => games.filter(game => {
         if (minConfidence === "HIGH" && game.prediction.confidence_score !== "HIGH") return false;
         if (minConfidence === "MEDIUM" && game.prediction.confidence_score === "LOW") return false;
+
+        // Status Filter
+        const isFinal = game.status?.toLowerCase().includes('final');
+        const isLive = !isFinal && (
+            game.status?.toLowerCase().includes('live') ||
+            game.status?.toLowerCase().includes('in progress') ||
+            (game.status?.includes('Q') && !game.status.includes('PM') && !game.status.includes('AM')) ||
+            (game.status?.includes('Half'))
+        );
+        const isUpcoming = !isFinal && !isLive;
+
+        if (activeTab === 'upcoming' && !isUpcoming) return false;
+        if (activeTab === 'live_games' && !isLive) return false;
+        if (activeTab === 'completed' && !isFinal) return false;
+
         return true;
-    }), [games, minConfidence]);
+    }), [games, minConfidence, activeTab]);
 
     // Sort Logic
     const sortedGames = React.useMemo(() => {
@@ -258,6 +668,9 @@ const Dashboard: React.FC = () => {
 
                         <div className="h-8 w-[1px] bg-white/10 mx-2" />
 
+                        <button onClick={() => setShowLicenseInfo(true)} className="p-2 text-zinc-400 hover:text-white transition-colors" title="License Info">
+                            <Shield size={20} />
+                        </button>
                         <button onClick={() => setShowRiskCalc(true)} className="p-2 text-zinc-400 hover:text-white transition-colors" title="Risk Calculator">
                             <Calculator size={20} />
                         </button>
@@ -282,12 +695,15 @@ const Dashboard: React.FC = () => {
                 <div className="max-w-7xl mx-auto px-6">
                     <div className="flex gap-1 overflow-x-auto">
                         {[
-                            { id: 'games', label: 'Games', icon: LayoutDashboard },
-                            { id: 'live', label: 'Live Markets', icon: Activity },
+                            { id: 'upcoming', label: 'Upcoming', icon: Calendar },
+                            { id: 'live_games', label: 'Live Games', icon: Activity },
+                            { id: 'completed', label: 'Completed', icon: CheckCircle },
+                            { id: 'market_feed', label: 'Market Feed', icon: LayoutDashboard },
+                            { id: 'trading_desk', label: 'Trading Desk', icon: DollarSign },
                         ].map((tab) => (
                             <button
                                 key={tab.id}
-                                onClick={() => setActiveTab(tab.id as 'games' | 'live')}
+                                onClick={() => setActiveTab(tab.id as any)}
                                 className={cn(
                                     "flex items-center gap-2 px-6 py-4 font-semibold text-sm transition-all relative",
                                     activeTab === tab.id
@@ -312,7 +728,15 @@ const Dashboard: React.FC = () => {
 
             {/* Main Content */}
             <main className="max-w-7xl mx-auto px-6 py-12 space-y-12">
-                {activeTab === 'live' ? (
+                {activeTab === 'trading_desk' ? (
+                    <Suspense fallback={
+                        <div className="flex items-center justify-center py-20">
+                            <div className="w-8 h-8 border-2 border-primary/30 border-t-primary rounded-full animate-spin" />
+                        </div>
+                    }>
+                        <TradingTerminal games={games.filter(g => g.market_ticker)} />
+                    </Suspense>
+                ) : activeTab === 'market_feed' ? (
                     <Suspense fallback={
                         <div className="flex items-center justify-center py-20">
                             <div className="w-8 h-8 border-2 border-kalshi-green/30 border-t-kalshi-green rounded-full animate-spin" />
@@ -478,7 +902,11 @@ const Dashboard: React.FC = () => {
                                     <Zap className="text-white w-5 h-5" />
                                 </div>
                                 <div>
-                                    <h2 className="text-2xl font-bold text-white">Upcoming Matchups</h2>
+                                    <h2 className="text-2xl font-bold text-white">
+                                        {activeTab === 'upcoming' ? 'Upcoming Matchups' :
+                                            activeTab === 'live_games' ? 'Live Games' :
+                                                activeTab === 'completed' ? 'Completed Games' : 'Games'}
+                                    </h2>
                                     <p className="text-sm text-zinc-400">AI predictions vs. Kalshi market pricing.</p>
                                 </div>
                             </div>
@@ -520,7 +948,8 @@ const Dashboard: React.FC = () => {
 
             {/* Modals */}
             <MarketHeatmapModal open={showHeatmap} onClose={() => setShowHeatmap(false)} games={games} />
-            <RiskCalculatorModal open={showRiskCalc} onClose={() => setShowRiskCalc(false)} />
+            <RiskCalculatorModal open={showRiskCalc} onClose={() => setShowRiskCalc(false)} games={games} />
+            <LicenseInfoModal isOpen={showLicenseInfo} onClose={() => setShowLicenseInfo(false)} />
 
             <Suspense fallback={null}>
                 <StrategyLab open={showStrategyLab} onClose={() => setShowStrategyLab(false)} games={games} />

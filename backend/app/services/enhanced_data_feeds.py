@@ -153,6 +153,9 @@ class EnhancedDataFeeds:
     
     def _normalize_team_name(self, team_name: str, league: str) -> str:
         """Convert team name to abbreviation"""
+        if not team_name:
+            return ""
+            
         # First try exact match
         name_map = self.team_name_to_abbr.get(league, {})
         if team_name in name_map:
@@ -296,6 +299,9 @@ class EnhancedDataFeeds:
         the current season, this is typically accurate. For historical games from
         past seasons, injury data may not reflect the actual injuries at that time.
         """
+        if not team_abbr:
+            return []
+            
         try:
             # Normalize team name to abbreviation
             normalized_abbr = self._normalize_team_name(team_abbr, league)
@@ -727,7 +733,7 @@ class EnhancedDataFeeds:
             }
         }
     
-    def get_market_context(self, home_team: str, away_team: str, game_date_str: str, league: str = "nfl") -> Dict:
+    def get_market_context(self, home_team: str, away_team: str, game_date_str: str, league: str = "nfl", include_intelligence: bool = True) -> Dict:
         """
         Get comprehensive market context with enhanced data.
         """
@@ -737,7 +743,7 @@ class EnhancedDataFeeds:
             game_date = datetime.now()
             
         # Check cache first
-        cache_key = f"{league}_{home_team}_{away_team}_{game_date.strftime('%Y-%m-%d')}"
+        cache_key = f"{league}_{home_team}_{away_team}_{game_date.strftime('%Y-%m-%d')}_{include_intelligence}"
         cached_context = self.context_cache.get(cache_key)
         if cached_context:
             logger.info(f"Returning cached market context for {cache_key}")
@@ -754,7 +760,16 @@ class EnhancedDataFeeds:
         weather = self._fetch_weather(home_team, game_date, league)
         
         # Get Free Intelligence (News + Sentiment)
-        intelligence = self._get_intelligence_free(home_team, away_team, league, game_date)
+        if include_intelligence:
+            intelligence = self._get_intelligence_free(home_team, away_team, league, game_date)
+        else:
+            intelligence = {
+                "news": [],
+                "betting_intelligence": [],
+                "social_sentiment": {},
+                "expert_predictions": [],
+                "recent_stats": {}
+            }
         
         # Enhance injuries deterministically
         injuries_dict = {"home": home_injuries, "away": away_injuries}
@@ -817,52 +832,89 @@ class EnhancedDataFeeds:
             return []
 
     def _fetch_reddit_sentiment(self, query: str) -> Dict:
-        """Fetch sentiment from Reddit (Free JSON API)"""
-        try:
-            headers = {'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.114 Safari/537.36'}
-            url = f"https://www.reddit.com/search.json?q={query}&sort=relevance&t=week&limit=10"
-            response = requests.get(url, headers=headers, timeout=5)
-            
-            if response.status_code != 200:
-                return {}
+        """Fetch sentiment from Reddit (Free JSON API) with retries"""
+        max_retries = 3
+        base_timeout = 10
+        
+        # User agents to rotate (simple list)
+        user_agents = [
+            'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.114 Safari/537.36',
+            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/92.0.4515.159 Safari/537.36',
+            'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/92.0.4515.107 Safari/537.36'
+        ]
+
+        for attempt in range(max_retries):
+            try:
+                headers = {'User-Agent': random.choice(user_agents)}
+                url = f"https://www.reddit.com/search.json?q={query}&sort=relevance&t=week&limit=10"
                 
-            data = response.json()
-            posts = []
-            
-            # Extract posts safely
-            if 'data' in data and 'children' in data['data']:
-                for child in data['data']['children']:
-                    post = child.get('data', {})
-                    posts.append(post.get('title', '') + " " + post.get('selftext', ''))
-            
-            if not posts:
-                return {}
+                # Increased timeout
+                response = requests.get(url, headers=headers, timeout=base_timeout)
                 
-            # Analyze sentiment
-            polarities = []
-            for text in posts:
-                blob = TextBlob(text)
-                polarities.append(blob.sentiment.polarity)
-            
-            avg_sentiment = sum(polarities) / len(polarities) if polarities else 0
-            
-            # Normalize to 0-1 scale (approx)
-            normalized_sentiment = (avg_sentiment + 1) / 2
-            
-            summary = "Neutral sentiment"
-            if avg_sentiment > 0.1: summary = "Positive sentiment"
-            elif avg_sentiment < -0.1: summary = "Negative sentiment"
-            
-            return {
-                "home_sentiment": 0.5, # Hard to split by team without complex logic
-                "away_sentiment": 0.5,
-                "overall_sentiment": normalized_sentiment,
-                "summary": f"{summary} on Reddit based on recent posts."
-            }
-            
-        except Exception as e:
-            logger.error(f"Error fetching Reddit sentiment: {e}")
-            return {}
+                if response.status_code == 429: # Rate limit
+                    logger.warning(f"Reddit rate limit hit. Retrying in {2 ** attempt}s...")
+                    time.sleep(2 ** attempt)
+                    continue
+                
+                if response.status_code != 200:
+                    logger.warning(f"Reddit API returned {response.status_code}")
+                    continue
+                    
+                data = response.json()
+                posts = []
+                
+                # Extract posts safely
+                if 'data' in data and 'children' in data['data']:
+                    for child in data['data']['children']:
+                        post = child.get('data', {})
+                        posts.append(post.get('title', '') + " " + post.get('selftext', ''))
+                
+                if not posts:
+                    return {
+                        "home_sentiment": 0.5,
+                        "away_sentiment": 0.5,
+                        "overall_sentiment": 0.5,
+                        "summary": "No recent Reddit discussions found."
+                    }
+                    
+                # Analyze sentiment
+                polarities = []
+                for text in posts:
+                    blob = TextBlob(text)
+                    polarities.append(blob.sentiment.polarity)
+                
+                avg_sentiment = sum(polarities) / len(polarities) if polarities else 0
+                
+                # Normalize to 0-1 scale (approx)
+                normalized_sentiment = (avg_sentiment + 1) / 2
+                
+                summary = "Neutral sentiment"
+                if avg_sentiment > 0.1: summary = "Positive sentiment"
+                elif avg_sentiment < -0.1: summary = "Negative sentiment"
+                
+                return {
+                    "home_sentiment": 0.5, # Hard to split by team without complex logic
+                    "away_sentiment": 0.5,
+                    "overall_sentiment": normalized_sentiment,
+                    "summary": f"{summary} on Reddit based on recent posts."
+                }
+                
+            except requests.Timeout:
+                logger.warning(f"Reddit API timeout (attempt {attempt + 1}/{max_retries})")
+                if attempt == max_retries - 1:
+                    break # Return default after last retry
+                time.sleep(1) # Short wait before retry
+            except Exception as e:
+                logger.error(f"Error fetching Reddit sentiment: {e}")
+                break # Don't retry on unknown errors
+        
+        # Fallback return
+        return {
+            "home_sentiment": 0.5,
+            "away_sentiment": 0.5,
+            "overall_sentiment": 0.5,
+            "summary": "Sentiment analysis unavailable (API timeout)."
+        }
 
     def _get_intelligence_free(self, home_team: str, away_team: str, league: str, game_date: datetime) -> Dict:
         """
