@@ -27,6 +27,14 @@ const GameAnalyticsModal: React.FC<GameAnalyticsModalProps> = ({ game, onClose }
     const [activeTab, setActiveTab] = useState<'overview' | 'insights' | 'context' | 'charts' | 'market'>('overview');
     const { getMarketContext, contextLoading, contextError } = useGameContext();
 
+    const isFinal = game.status?.toLowerCase().includes('final');
+    const isLive = !isFinal && (
+        game.status?.toLowerCase().includes('live') ||
+        game.status?.toLowerCase().includes('in progress') ||
+        (game.status?.includes('Q') && !game.status.includes('PM') && !game.status.includes('AM')) ||
+        (game.status?.includes('Half'))
+    );
+
     // Use Zustand store with proper subscription to make contextData reactive
     const contextData = useDataStore((state) => state.marketContexts[game.game_id]?.data || null);
 
@@ -43,8 +51,8 @@ const GameAnalyticsModal: React.FC<GameAnalyticsModalProps> = ({ game, onClose }
     };
 
     const recommendationColor =
-        prediction.recommendation.includes("Follow") ? "text-emerald-400" :
-            prediction.recommendation.includes("Fade") ? "text-amber-400" :
+        prediction.recommendation?.includes("Follow") ? "text-emerald-400" :
+            prediction.recommendation?.includes("Fade") ? "text-amber-400" :
                 "text-zinc-400";
 
     const formattedDate = game.game_date ? new Date(game.game_date).toLocaleString(undefined, { weekday: 'short', hour: 'numeric', minute: '2-digit' }) : 'TBD';
@@ -1169,10 +1177,17 @@ const GameAnalyticsModal: React.FC<GameAnalyticsModalProps> = ({ game, onClose }
                 {/* Header */}
                 <div className="p-6 border-b border-zinc-800 bg-zinc-900/50">
                     <div className="flex items-start justify-between mb-6">
-                        <div>
+                        <div className="flex-1">
                             <div className="flex items-center gap-3 mb-2">
-                                <h2 className="text-2xl font-bold text-white tracking-tight">
-                                    {game.away_team} <span className="text-zinc-500">@</span> {game.home_team}
+                                <h2 className="text-2xl font-bold text-white tracking-tight flex items-center gap-3">
+                                    <span>{game.away_team}</span>
+                                    {(game.away_score !== undefined && game.home_score !== undefined) && (
+                                        <span className="font-mono text-zinc-400 text-xl">
+                                            {game.away_score} - {game.home_score}
+                                        </span>
+                                    )}
+                                    <span className="text-zinc-500">@</span>
+                                    <span>{game.home_team}</span>
                                 </h2>
                                 <div className={cn("px-2 py-0.5 rounded text-xs font-bold border",
                                     prediction.confidence_score === 'HIGH' ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/20" :
@@ -1181,10 +1196,15 @@ const GameAnalyticsModal: React.FC<GameAnalyticsModalProps> = ({ game, onClose }
                                 )}>
                                     {prediction.confidence_score} CONFIDENCE
                                 </div>
-                                {game.status === 'live' && (
+                                {isLive && (
                                     <div className="px-2 py-0.5 rounded text-xs font-bold bg-red-500/10 text-red-500 border border-red-500/20 animate-pulse flex items-center gap-1">
                                         <div className="w-1.5 h-1.5 rounded-full bg-red-500" />
                                         LIVE
+                                    </div>
+                                )}
+                                {isFinal && (
+                                    <div className="px-2 py-0.5 rounded text-xs font-bold bg-zinc-500/10 text-zinc-400 border border-zinc-500/20 flex items-center gap-1">
+                                        FINAL
                                     </div>
                                 )}
                             </div>
@@ -1205,12 +1225,19 @@ const GameAnalyticsModal: React.FC<GameAnalyticsModalProps> = ({ game, onClose }
                                 )}
                             </div>
                         </div>
-                        <button
-                            onClick={onClose}
-                            className="p-2 hover:bg-zinc-800 rounded-lg transition-colors text-zinc-400 hover:text-white"
-                        >
-                            <X size={20} />
-                        </button>
+                        <div className="flex items-center gap-3">
+                            {game.last_updated && (
+                                <div className="text-[10px] text-zinc-500 font-mono hidden md:block">
+                                    Updated: {new Date(game.last_updated).toLocaleTimeString()}
+                                </div>
+                            )}
+                            <button
+                                onClick={onClose}
+                                className="p-2 hover:bg-zinc-800 rounded-full transition-colors"
+                            >
+                                <X size={20} className="text-zinc-400" />
+                            </button>
+                        </div>
                     </div>
 
                     {/* Navigation Tabs */}

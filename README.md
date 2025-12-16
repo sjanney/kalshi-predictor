@@ -1,14 +1,86 @@
+<p align="center">
+  <img src="assets/main_logo.png" alt="Kalshi Predictor Logo" width="200"/>
+</p>
+
 # Kalshi Predictor v3.0
 
-Production-ready prediction engine for Kalshi sports markets (NBA & NFL).
+Production-ready prediction engine for Kalshi sports markets (NBA & NFL). Built with a modern Electron desktop app, real-time data feeds, and advanced ML-powered predictions.
 
-## Features
+---
 
-- **Enhanced Prediction Engine**: Multi-model ensemble with Elo ratings, recent form analysis, and statistical calibration
-- **Real-time Market Data**: Live Kalshi market integration with synthetic fallbacks
-- **Advanced Analytics**: Injury impact analysis, weather correlation, and market context
-- **Smart Signals**: Edge detection, divergence alerts, and actionable insights
-- **Production Ready**: Error handling, logging, security enhancements, and environment configuration
+## 🎯 Features
+
+### Dashboard Overview
+The main dashboard provides a comprehensive view of today's games with live predictions, market odds, and actionable trading signals.
+
+![Dashboard Overview](assets/image.png)
+
+### Game Cards with Live Predictions
+Each game card displays team matchups, win probabilities, current market prices, and real-time edge calculations. Color-coded indicators show when there's value in the market.
+
+![Game Cards](assets/image%20copy.png)
+
+### Detailed Game Analytics
+Click on any game to access in-depth analytics including:
+- **Win probability breakdown** with confidence intervals
+- **Historical head-to-head** performance
+- **Elo rating comparison** between teams
+- **Recent form analysis** (last 10 games)
+
+![Game Analytics](assets/image%20copy%202.png)
+
+### Market Intelligence
+Real-time market data integration shows:
+- Current bid/ask spreads
+- Price movement trends
+- Volume indicators
+- Edge opportunities highlighted
+
+![Market Intelligence](assets/image%20copy%203.png)
+
+### Injury & News Impact
+Track how injuries and breaking news affect predictions:
+- Player injury status with severity ratings
+- Automatic prediction adjustments
+- News sentiment analysis
+
+![Injury Tracking](assets/image%20copy%204.png)
+
+### Weather Analysis
+For outdoor sports, weather conditions are factored into predictions:
+- Temperature and wind speed impact
+- Historical performance in similar conditions
+- Weather-adjusted win probabilities
+
+![Weather Analysis](assets/image%20copy%205.png)
+
+### Trading Signals
+Smart signal generation identifies the best opportunities:
+- **Edge signals** when predictions diverge from market
+- **Divergence alerts** for arbitrage opportunities
+- **Confidence scores** to prioritize trades
+
+![Trading Signals](assets/image%20copy%206.png)
+
+### Performance Tracking
+Monitor your prediction accuracy over time:
+- Historical accuracy metrics
+- Calibration analysis
+- ROI tracking
+
+![Performance Tracking](assets/image%20copy%207.png)
+
+---
+
+## ✨ Key Capabilities
+
+| Feature | Description |
+|---------|-------------|
+| **Enhanced Prediction Engine** | Multi-model ensemble with Elo ratings, recent form analysis, and statistical calibration |
+| **Real-time Market Data** | Live Kalshi market integration with synthetic fallbacks |
+| **Advanced Analytics** | Injury impact analysis, weather correlation, and market context |
+| **Smart Signals** | Edge detection, divergence alerts, and actionable insights |
+| **Production Ready** | Error handling, logging, security enhancements, and environment configuration |
 
 ## Quick Start
 

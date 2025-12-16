@@ -1,0 +1,45 @@
+# Private keys - NEVER commit these
+prediction_api_key.txt
+*.pem
+private_key.txt
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+env/
+.env
+*.egg-info/
+dist/
+build/
+
+# Node
+node_modules/
+npm-debug.log*
+
+# Electron
+out/
+*.asar
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+
+# Logs
+*.log
+logs/
+
+# Database
+*.db
+*.sqlite
+
+# Build artifacts
+*.dmg
+*.pkg
+installers/*/build/

@@ -306,8 +306,13 @@
       "elo_prob": 1500.0,
       "form_prob": 0.5
     },
-    "outcome": null,
-    "verified": false
+    "outcome": {
+      "home_won": false,
+      "home_score": 15,
+      "away_score": 24
+    },
+    "verified": true,
+    "verified_at": "2025-11-28T15:03:51.734801"
   },
   {
     "game_id": "401772785",

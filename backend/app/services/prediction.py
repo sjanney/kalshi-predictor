@@ -87,7 +87,8 @@ class PredictionEngine:
         # Placeholder logic
         return "MEDIUM"
 
-    def generate_prediction(self, game: Dict, home_stats: Dict, away_stats: Dict, kalshi_markets: Optional[Dict]) -> Dict:
+    def generate_prediction(self, game: Dict, home_stats: Dict, away_stats: Dict, 
+                           kalshi_markets: Optional[Dict], include_intelligence: bool = True) -> Dict:
         """
         Generate a comprehensive prediction for a game using 2.0 logic.
         kalshi_markets is now a dict containing potentially 'home_market' and 'away_market'.
@@ -226,7 +227,8 @@ class PredictionEngine:
             game.get('home_team_abbrev'),
             game.get('away_team_abbrev'),
             game.get('game_date'),
-            game.get('league', 'nba')
+            game.get('league', 'nba'),
+            include_intelligence=include_intelligence
         )
         
         market_data_for_signals = {

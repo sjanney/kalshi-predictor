@@ -122,6 +122,7 @@ export interface Game {
     factors: GameFactors;
     market_context?: MarketContext;
     last_updated?: number; // Timestamp from backend
+    market_ticker?: string; // Kalshi market ticker for trading
 }
 
 export interface WeatherData {
@@ -232,6 +233,67 @@ export interface MarketContext {
 }
 
 export type League = 'nba' | 'nfl';
+
+// ============================================================================
+// TRADING TYPES
+// ============================================================================
+
+export interface TradingOrder {
+    order_id: string;
+    market_ticker: string;
+    side: "yes" | "no";
+    order_type: "market" | "limit";
+    quantity: number;
+    price?: number;
+    filled_quantity: number;
+    average_fill_price?: number;
+    status: "pending" | "filled" | "partially_filled" | "cancelled" | "rejected";
+    created_at: string;
+    updated_at: string;
+    error_message?: string;
+}
+
+export interface TradingPosition {
+    market_ticker: string;
+    side: "yes" | "no";
+    quantity: number;
+    average_entry_price: number;
+    current_market_price: number;
+    unrealized_pnl: number;
+    realized_pnl: number;
+    total_pnl: number;
+    position_value: number;
+    game_id?: string;
+    league?: string;
+    description?: string;
+    opened_at: string;
+}
+
+export interface PnLSummary {
+    total_pnl: number;
+    unrealized_pnl: number;
+    realized_pnl: number;
+    total_exposure: number;
+    position_count: number;
+    balance: number;
+    available_capital: number;
+}
+
+export interface PlaceOrderRequest {
+    market_ticker: string;
+    side: "yes" | "no";
+    quantity: number;
+    order_type: "market" | "limit";
+    price?: number;
+    game_id?: string;
+}
+
+export interface PlaceOrderResponse {
+    order_id: string;
+    status: string;
+    message: string;
+    order_details: TradingOrder;
+}
 
 const BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000';
 const API_BASE = `${BASE_URL}/api`;
@@ -505,7 +567,89 @@ export const api = {
             throw new Error('Failed to fetch monitor status');
         }
         return response.json();
-    }
+    },
+
+    // ========================================================================
+    // TRADING API
+    // ========================================================================
+
+    // Order Management
+    placeOrder: async (request: PlaceOrderRequest): Promise<PlaceOrderResponse> => {
+        const response = await fetch(`${API_BASE}/trading/orders`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify(request),
+        });
+        if (!response.ok) {
+            const error = await response.json();
+            throw new Error(error.detail || 'Failed to place order');
+        }
+        return response.json();
+    },
+
+    cancelOrder: async (orderId: string): Promise<void> => {
+        const response = await fetch(`${API_BASE}/trading/orders/${orderId}`, {
+            method: 'DELETE',
+        });
+        if (!response.ok) {
+            throw new Error('Failed to cancel order');
+        }
+    },
+
+    getActiveOrders: async (): Promise<TradingOrder[]> => {
+        const response = await fetch(`${API_BASE}/trading/orders/active`);
+        if (!response.ok) {
+            throw new Error('Failed to fetch active orders');
+        }
+        const data = await response.json();
+        return data.active_orders || [];
+    },
+
+    getOrderHistory: async (limit: number = 50): Promise<TradingOrder[]> => {
+        const response = await fetch(`${API_BASE}/trading/orders/history?limit=${limit}`);
+        if (!response.ok) {
+            throw new Error('Failed to fetch order history');
+        }
+        const data = await response.json();
+        return data.order_history || [];
+    },
+
+    // Position Management
+    getPositions: async (): Promise<TradingPosition[]> => {
+        const response = await fetch(`${API_BASE}/trading/positions`);
+        if (!response.ok) {
+            throw new Error('Failed to fetch positions');
+        }
+        const data = await response.json();
+        return data.positions || [];
+    },
+
+    getPnLSummary: async (): Promise<PnLSummary> => {
+        const response = await fetch(`${API_BASE}/trading/pnl`);
+        if (!response.ok) {
+            throw new Error('Failed to fetch P&L summary');
+        }
+        return response.json();
+    },
+
+    getBalance: async (): Promise<{ balance: number; available: number; currency: string }> => {
+        const response = await fetch(`${API_BASE}/trading/balance`);
+        if (!response.ok) {
+            throw new Error('Failed to fetch balance');
+        }
+        return response.json();
+    },
+
+    refreshPositions: async (): Promise<void> => {
+        const response = await fetch(`${API_BASE}/trading/refresh`, {
+            method: 'POST',
+        });
+        if (!response.ok) {
+            throw new Error('Failed to refresh positions');
+        }
+    },
 };
 
 // Accuracy tracking types

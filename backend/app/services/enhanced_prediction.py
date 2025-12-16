@@ -13,11 +13,16 @@ The stat_model_prob is the core prediction shown to users in the 'Model' section
 from typing import Dict, List, Optional, Tuple
 import pandas as pd
 import numpy as np
+import math
 from datetime import datetime, timedelta
 import os
 from app.services.enhanced_signals import EnhancedSignalEngine
 from app.services.enhanced_data_feeds import EnhancedDataFeeds
 from app.services.elo_manager import EloManager
+from app.services.historical_data import historical_service
+import logging
+
+logger = logging.getLogger(__name__)
 
 class EnhancedPredictionEngine:
     """
@@ -252,7 +257,7 @@ class EnhancedPredictionEngine:
         team_games = [
             g for g in all_games 
             if (str(g.get('home_team_id')) == str(team_id) or str(g.get('away_team_id')) == str(team_id))
-            and g.get('status') == 'Final'
+            and 'Final' in g.get('status', '')
         ]
         
         # Sort by date descending
@@ -266,7 +271,7 @@ class EnhancedPredictionEngine:
                 continue
             try:
                 g_date = datetime.fromisoformat(g_date_str.replace("Z", ""))
-                if g_date < current_date:
+                if g_date.date() < current_date.date():
                     last_game_date = g_date
                     break
             except:
@@ -275,7 +280,7 @@ class EnhancedPredictionEngine:
         if not last_game_date:
             return 7  # Assume well rested if no history
             
-        delta = current_date - last_game_date
+        delta = current_date.date() - last_game_date.date()
         return delta.days
 
     def calculate_travel_impact(self, home_abbr: str, away_abbr: str, game_date: datetime, league: str) -> Dict:
@@ -544,6 +549,82 @@ class EnhancedPredictionEngine:
         
         return float(final_prob)
     
+    def _calculate_pythagorean_win_pct(self, points_for: float, points_against: float, league: str) -> float:
+        """
+        Calculate Pythagorean Expectation for win percentage.
+        Formula: PF^exp / (PF^exp + PA^exp)
+        """
+        if points_for == 0 and points_against == 0:
+            return 0.5
+            
+        # Exponents based on sports analytics research
+        exponent = 13.91 if league == 'nba' else 2.37
+        
+        numerator = points_for ** exponent
+        denominator = numerator + (points_against ** exponent)
+        
+        if denominator == 0:
+            return 0.5
+            
+        return numerator / denominator
+
+    def _calculate_log5_prob(self, p_a: float, p_b: float) -> float:
+        """
+        Calculate win probability using Bill James' Log5 method.
+        P(A wins) = (Pa - Pa*Pb) / (Pa + Pb - 2*Pa*Pb)
+        """
+        # Avoid division by zero or invalid probabilities
+        p_a = max(0.01, min(0.99, p_a))
+        p_b = max(0.01, min(0.99, p_b))
+        
+        numerator = p_a - (p_a * p_b)
+        denominator = p_a + p_b - (2 * p_a * p_b)
+        
+        if denominator == 0:
+            return 0.5
+            
+        return numerator / denominator
+
+    def calculate_season_stats(self, team_id: str, league: str, all_games: List[Dict]) -> Dict:
+        """Calculate full season statistics including Pythagorean Expectation"""
+        team_games = [
+            g for g in all_games 
+            if (str(g.get('home_team_id')) == str(team_id) or str(g.get('away_team_id')) == str(team_id))
+            and 'Final' in g.get('status', '')
+        ]
+        
+        if not team_games:
+            return {
+                "points_for": 0,
+                "points_against": 0,
+                "pythagorean_win_pct": 0.5,
+                "games_played": 0
+            }
+            
+        points_for = 0
+        points_against = 0
+        
+        for g in team_games:
+            is_home = str(g.get('home_team_id')) == str(team_id)
+            home_score = int(g.get('home_score', 0))
+            away_score = int(g.get('away_score', 0))
+            
+            if is_home:
+                points_for += home_score
+                points_against += away_score
+            else:
+                points_for += away_score
+                points_against += home_score
+                
+        pyth_win_pct = self._calculate_pythagorean_win_pct(points_for, points_against, league)
+        
+        return {
+            "points_for": points_for,
+            "points_against": points_against,
+            "pythagorean_win_pct": pyth_win_pct,
+            "games_played": len(team_games)
+        }
+
     def calculate_volatility(self, home_stats: Dict, away_stats: Dict) -> str:
         """
         Estimate game volatility based on team styles.
@@ -553,7 +634,7 @@ class EnhancedPredictionEngine:
         return "MEDIUM"
 
     def generate_prediction(self, game: Dict, home_stats: Dict, away_stats: Dict, 
-                           kalshi_markets: Optional[Dict], all_games: List[Dict] = None) -> Dict:
+                           kalshi_markets: Optional[Dict], all_games: List[Dict] = None, include_intelligence: bool = True) -> Dict:
         """
         Generate enhanced prediction using multiple models.
         """
@@ -599,15 +680,38 @@ class EnhancedPredictionEngine:
         form_prob = 0.5 + (form_diff * 0.35) + (momentum_diff * 0.15) + strength_bonus + 0.05  # Home advantage
         form_prob = max(0.12, min(0.88, form_prob))
         
-        # 3. Enhanced record-based prediction with better scaling
+        # 3. Enhanced record-based prediction using Pythagorean Expectation and Log5
+        # Calculate season-long stats
+        home_season = self.calculate_season_stats(home_id, league, full_games_list)
+        away_season = self.calculate_season_stats(away_id, league, full_games_list)
+        
+        # Initialize records safely
         home_record = game.get('home_record', '0-0')
         away_record = game.get('away_record', '0-0')
-        home_win_pct = self._calculate_record_win_prob(home_record)
-        away_win_pct = self._calculate_record_win_prob(away_record)
         
-        # Scale record difference more carefully - max impact of ~20%
-        record_diff = home_win_pct - away_win_pct
-        record_prob = 0.5 + (record_diff * 0.35) + 0.055  # Home advantage ~5.5%
+        # Use Pythagorean Expectation if enough games played, otherwise fallback to record
+        if home_season['games_played'] >= 5 and away_season['games_played'] >= 5:
+            home_pyth = home_season['pythagorean_win_pct']
+            away_pyth = away_season['pythagorean_win_pct']
+            
+            # Use Log5 to calculate win probability
+            # Log5 estimates P(A wins) given P(A) and P(B) against the field
+            record_prob = self._calculate_log5_prob(home_pyth, away_pyth)
+            
+            # Add small home advantage boost to Log5 result (Log5 is neutral site)
+            record_prob += 0.04 
+        else:
+            # Fallback to simple record win %
+            home_win_pct = self._calculate_record_win_prob(home_record)
+            away_win_pct = self._calculate_record_win_prob(away_record)
+            
+            record_diff = home_win_pct - away_win_pct
+            record_prob = 0.5 + (record_diff * 0.35) + 0.055
+            
+        # Ensure record_prob is a valid float
+        if math.isnan(record_prob):
+            record_prob = 0.5
+            
         record_prob = max(0.15, min(0.85, record_prob))
         
         # 3c. Calculate H2H adjustment (needed for stat_model_prob)
@@ -662,24 +766,30 @@ class EnhancedPredictionEngine:
         # Combine contextual factors
         context_prob = 0.5 + rest_impact + travel_impact
         
+        # Ensure all probabilities are valid floats before ensemble
+        if math.isnan(elo_prob): elo_prob = 0.5
+        if math.isnan(form_prob): form_prob = 0.5
+        if math.isnan(record_prob): record_prob = 0.5
+        if math.isnan(h2h_adjustment): h2h_adjustment = 0.0
+        if math.isnan(injury_prob): injury_prob = 0.5
+        if math.isnan(context_prob): context_prob = 0.5
+        
         # 3d. Build comprehensive stat_model_prob (what users see as 'Model')
         # This is a weighted ensemble of multiple statistical factors
         # Using research-backed weights for sports prediction
         stat_model_prob = (
             elo_prob * self.STAT_ELO_WEIGHT +          # Elo is strongest (40%)
             form_prob * self.STAT_FORM_WEIGHT +        # Form is very predictive (20%)
-            record_prob * self.STAT_RECORD_WEIGHT +    # Season record adds context (15%)
+            record_prob * self.STAT_RECORD_WEIGHT +    # Season record/Pythagorean adds context (15%)
             (0.5 + h2h_adjustment) * self.STAT_H2H_WEIGHT + # H2H historical adjustment (10%)
             injury_prob * self.STAT_INJURY_WEIGHT +    # Injury impact (15%)
             (context_prob - 0.5) * 0.10                # Rest/Travel context (10% implicit weight)
         )
-
         
-        # Apply home field advantage boost (research shows ~3-5% edge)
-        # This is on top of the Elo home advantage already applied
-        # REMOVED: This was double counting. Elo, Form, and Record already include HA.
-        # stat_model_prob = stat_model_prob + 0.02
-        
+        # Final safety check
+        if math.isnan(stat_model_prob):
+            stat_model_prob = 0.5
+            
         # Clamp to reasonable bounds (model should rarely be > 85% confident)
         stat_model_prob = max(0.10, min(0.90, stat_model_prob))
         
@@ -744,14 +854,29 @@ class EnhancedPredictionEngine:
         
         # 5. Calculate final probability
         # We use the statistical model probability as the official prediction.
-        # Previously we blended with market, but that confused users when signals disagreed.
         home_win_prob = stat_model_prob
         
         # 6. Statistical ensemble prediction (replaces ML)
         # Calculate differences for statistical model
-
+        
         form_diff = home_form['win_pct'] - away_form['win_pct']
-        record_diff = home_win_pct - away_win_pct
+        
+        # Use Pythagorean diff if available
+        if home_season['games_played'] >= 5:
+            record_diff = home_season['pythagorean_win_pct'] - away_season['pythagorean_win_pct']
+        else:
+            # Fallback to simple record win % if not already calculated
+            if 'home_win_pct' not in locals():
+                home_win_pct = self._calculate_record_win_prob(home_record)
+            if 'away_win_pct' not in locals():
+                away_win_pct = self._calculate_record_win_prob(away_record)
+            record_diff = home_win_pct - away_win_pct
+            
+        # Ensure inputs are valid floats
+        if math.isnan(elo_diff): elo_diff = 0.0
+        if math.isnan(form_diff): form_diff = 0.0
+        if math.isnan(record_diff): record_diff = 0.0
+        if math.isnan(h2h_adjustment): h2h_adjustment = 0.0
         
         stat_ensemble_prob = self.predict_with_statistical(
             elo_diff=elo_diff,
@@ -760,6 +885,10 @@ class EnhancedPredictionEngine:
             h2h_adjustment=h2h_adjustment,
             market_confidence=kalshi_confidence
         )
+        
+        # Safety check for ensemble result
+        if math.isnan(stat_ensemble_prob):
+            stat_ensemble_prob = 0.5
         
         # 7. Dynamic weighting based on confidence
         w_kalshi = self.WEIGHT_KALSHI
@@ -781,7 +910,7 @@ class EnhancedPredictionEngine:
             w_form = 0.20
             w_ensemble = 0.05
         
-        # 8. Combine predictions (statistical ensemble replaces ML)
+        # 8. Combine predictions
         base_prob = (
             stat_model_prob * w_stats +
             home_kalshi_prob * w_kalshi +
@@ -822,7 +951,8 @@ class EnhancedPredictionEngine:
             game.get('home_team_abbrev'),
             game.get('away_team_abbrev'),
             game_date,
-            league
+            league,
+            include_intelligence=include_intelligence
         )
         
         market_data = {
@@ -910,66 +1040,70 @@ class EnhancedPredictionEngine:
         elif away_form['strength'] == "STRONG":
             reasoning.append(f"Away team in strong recent form ({away_form['win_pct']:.0%} win rate, +{away_form['avg_point_diff']:.1f} avg margin).")
         
+        # Add Pythagorean reasoning if relevant
+        if home_season['games_played'] >= 5:
+            pyth_diff = home_season['pythagorean_win_pct'] - away_season['pythagorean_win_pct']
+            if abs(pyth_diff) > 0.15:
+                leader = "Home" if pyth_diff > 0 else "Away"
+                reasoning.append(f"{leader} team has significantly better underlying stats (Pythagorean Expectation).")
+        
         # Injury reasoning
         if home_impact['severity'] in ['HIGH', 'CRITICAL']:
             reasoning.append(f"Home team has {home_impact['severity']} injury impact ({len(home_impact['key_players_out'])} key players out).")
         if away_impact['severity'] in ['HIGH', 'CRITICAL']:
             reasoning.append(f"Away team has {away_impact['severity']} injury impact ({len(away_impact['key_players_out'])} key players out).")
             
-        if h2h['games_played'] > 0 and abs(h2h['home_win_pct'] - 0.5) > 0.2:
-            reasoning.append(f"H2H: Home team {h2h['home_wins']}-{h2h['away_wins']} (avg margin: {h2h['avg_point_diff']:+.1f}).")
-        
-        if abs(record_diff) > 0.25:
-            reasoning.append(f"Season records: Home {home_win_pct:.1%} vs Away {away_win_pct:.1%}.")
-        
-        if elo_diff > 100:
-            reasoning.append(f"Strong Elo advantage for home team (+{elo_diff:.0f}).")
-        elif elo_diff < -100:
-            reasoning.append(f"Strong Elo advantage for away team ({abs(elo_diff):.0f}).")
+        # Weather reasoning
+        if context.get('weather', {}).get('correlation_impact', {}).get('severity') == 'HIGH':
+            reasoning.append(f"Weather Alert: {context['weather']['correlation_impact']['note']}")
             
-        # Context reasoning
-        if abs(rest_impact) > 0.01:
-            if rest_impact > 0:
-                reasoning.append(f"Rest advantage favors Home (Home {home_rest}d vs Away {away_rest}d).")
-            else:
-                reasoning.append(f"Rest advantage favors Away (Home {home_rest}d vs Away {away_rest}d).")
-                
-        if abs(travel_data['impact']) > 0.01:
-            reasoning.append(f"Travel impact: {travel_data['description']}.")
+        # Market reasoning
+        if kalshi_confidence == "HIGH":
+            reasoning.append(f"High market liquidity ({volume} contracts) suggests efficient pricing.")
         
-        for sig in signals:
-            reasoning.append(f"{sig['type']}: {sig['description']}")
-        
-        return {
+        result = {
             "game_id": game.get('game_id'),
             "league": league,
             "home_team": game.get('home_team_name'),
             "away_team": game.get('away_team_name'),
-            "home_abbr": game.get('home_team_abbrev'),
-            "away_abbr": game.get('away_team_abbrev'),
+            "home_abbr": home_abbr,
+            "away_abbr": away_abbr,
             "game_date": game.get('game_date'),
             "status": game.get('status'),
             "home_score": game.get('home_score'),
             "away_score": game.get('away_score'),
             "prediction": {
-                "home_win_prob": round(final_prob, 3),
-                "stat_model_prob": round(stat_model_prob, 3),  # Core model shown to users
-                "elo_prob": round(elo_prob, 3),
-                "form_prob": round(form_prob, 3),
-                "injury_prob": round(injury_prob, 3),
-                "stat_ensemble_prob": round(stat_ensemble_prob, 3),  # Replaces ml_prob
-                "kalshi_prob": round(home_kalshi_prob, 3),
-                "home_kalshi_prob": round(home_kalshi_prob, 3),
-                "away_kalshi_prob": round(away_kalshi_prob, 3),
-                "confidence_score": kalshi_confidence,
-                "recommendation": recommendation,
-                "predicted_winner": game.get('home_team_name', 'Home') if stat_model_prob > 0.5 else game.get('away_team_name', 'Away'),
-                "suggested_wager": wager_display,
+                "home_win_prob": float(final_prob),
+                "away_win_prob": float(1.0 - final_prob),
+                "confidence": "HIGH" if abs(final_prob - 0.5) > 0.2 else ("MEDIUM" if abs(final_prob - 0.5) > 0.1 else "LOW"),
+                "model_confidence": float(stat_model_prob),
+                "stat_model_prob": float(stat_model_prob),
+                "market_confidence": float(home_kalshi_prob),
+                "home_kalshi_prob": float(home_kalshi_prob),
+                "away_kalshi_prob": float(away_kalshi_prob),
+                "elo_prob": float(elo_prob),
+                "form_prob": float(form_prob),
+                "record_prob": float(record_prob),
+                "injury_impact": float(injury_prob),
+                "stat_ensemble_prob": float(stat_ensemble_prob),
+                "context_impact": float(context_prob),
+                "pythagorean_prob": float(record_prob) if home_season['games_played'] >= 5 else None,
+                "divergence": float(divergence),
+                "confidence_score": "HIGH" if abs(final_prob - 0.5) > 0.2 else ("MEDIUM" if abs(final_prob - 0.5) > 0.1 else "LOW"),
+                "signal_strength": signal_strength,
+                "recommendation": recommendation
+            },
+            "recommendation": {
+                "action": recommendation,
+                "wager": wager_display,
+                "wager_amount": wager_amount,
                 "value_proposition": value_proposition,
                 "signal_strength": signal_strength,
-                "divergence": round(divergence, 3),
-                "volatility": self.calculate_volatility({}, {}),
+                "reasoning": reasoning
             },
+            "signals": signals,
+            "context": context,
+            "timestamp": datetime.now().isoformat(),
             "analytics": {
                 "elo_ratings": {
                     "home": round(home_elo, 1),
@@ -990,11 +1124,11 @@ class EnhancedPredictionEngine:
                     "stat_ensemble": round(w_ensemble, 2)
                 },
                 "model_features": {
-                    "home_advantage": round(0.05, 3),  # Base home advantage
-                    "record_diff": round(record_diff / 2, 3),  # Normalized record difference
-                    "recent_form": round((home_form['win_pct'] - away_form['win_pct']) / 2, 3),  # Normalized form difference
-                    "elo_advantage": round(elo_diff / 200, 3),  # Normalized Elo difference (divide by 200 for scale)
-                    "injury_impact": round(net_injury_impact * 0.04, 3) # Injury impact
+                    "home_advantage": round(0.05, 3),
+                    "record_diff": round(record_diff / 2, 3),
+                    "recent_form": round((home_form['win_pct'] - away_form['win_pct']) / 2, 3),
+                    "elo_advantage": round(elo_diff / 200, 3),
+                    "injury_impact": round(net_injury_impact * 0.04, 3)
                 },
                 "reasoning": reasoning,
                 "signals": signals,
@@ -1026,6 +1160,8 @@ class EnhancedPredictionEngine:
                 "confidence": kalshi_confidence
             }
         }
+        
+        return result
     
     def _calculate_record_win_prob(self, record: str) -> float:
         """Convert 'W-L' record to win probability"""
